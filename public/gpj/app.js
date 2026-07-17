@@ -733,7 +733,28 @@
     if (action === "needs-part") acquisitionModal();
     if (action === "confirm-part") { var partRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (partRow) { partRow.stage = 1; partRow.partCode = $("#repair-part").value; partRow.notes = [partRow.notes,$("#repair-part-notes").value.trim()].filter(Boolean).join(" · "); saveOperations(); } $("#modal").close(); render(); showToast("Aquisição iniciada com a peça selecionada."); }
     if (action === "open-parts") { $("#modal").close(); setView("parts"); }
-    if (action === "no-part") { var doneRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (doneRow) { doneRow.elapsedSeconds = repairElapsedSeconds(doneRow); doneRow.startedAt = null; doneRow.status = "history"; doneRow.stage = 4; saveOperations(); } $("#modal").close(); state.repairTab = "history"; render(); showToast("Solução registrada e reparo finalizado."); }
+    if (action === "no-part") { solutionModal(); }
+    if (action === "add-solution") addSolutionModal();
+    if (action === "save-solution") { var solutionName = $("#solution-name").value.trim(); if (!solutionName) { showToast("Informe o nome da solução."); return; } if (solutions.indexOf(solutionName) < 0) solutions.push(solutionName); saveOperations(); $("#modal").close(); solutionModal(); var sel = $("#repair-solution"); if (sel) sel.value = solutionName; showToast("Solução cadastrada e disponível na lista."); }
+    if (action === "confirm-solution") {
+      var solutionValue = $("#repair-solution") ? $("#repair-solution").value : "";
+      var solutionNotes = $("#repair-solution-notes") ? $("#repair-solution-notes").value.trim() : "";
+      var doneRow = repairRows.find(function (row) { return row.id === state.currentRepairId; });
+      if (!solutionValue) { showToast("Selecione uma solução."); return; }
+      if (doneRow) {
+        doneRow.elapsedSeconds = repairElapsedSeconds(doneRow);
+        doneRow.startedAt = null;
+        doneRow.status = "history";
+        doneRow.stage = 4;
+        doneRow.solution = solutionValue;
+        doneRow.notes = [doneRow.notes, "Solução: " + solutionValue, solutionNotes].filter(Boolean).join(" · ");
+        saveOperations();
+      }
+      $("#modal").close();
+      state.repairTab = "history";
+      render();
+      showToast("Solução registrada e reparo finalizado.");
+    }
     if (action === "test-approved") { var approvedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (approvedRow) { approvedRow.elapsedSeconds = repairElapsedSeconds(approvedRow); approvedRow.startedAt = null; approvedRow.status = "history"; approvedRow.stage = 4; saveOperations(); } $("#modal").close(); state.repairTab = "history"; render(); showToast("Teste aprovado e reparo finalizado."); }
     if (action === "test-rejected") { var rejectedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (rejectedRow) { rejectedRow.stage = 1; rejectedRow.notes = [rejectedRow.notes,"Teste reprovado: novo ciclo de peça"].filter(Boolean).join(" · "); saveOperations(); } acquisitionModal(); }
     if (action === "pause-repair") { var pauseRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (pauseRow) { pauseRow.elapsedSeconds = repairElapsedSeconds(pauseRow); pauseRow.startedAt = null; pauseRow.status = "waiting"; saveOperations(); state.repairTab = "waiting"; render(); showToast("Atividade movida para Em espera. O cronômetro foi congelado."); } }
