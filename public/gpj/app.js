@@ -662,6 +662,37 @@
     openModal("Conclusão de etapa", serial || "Reparo", "<p style=\"color:var(--muted);font-size:11px\">O diagnóstico precisa de troca de peça?</p><div class=\"quick-grid\" style=\"padding:0\"><button data-action=\"needs-part\"><strong>Sim, adquirir peça</strong><small>Abre um novo ciclo de aquisição, montagem e testes.</small></button><button data-action=\"no-part\"><strong>Não, finalizar</strong><small>Registra a solução e segue direto à finalização.</small></button></div>");
   }
 
+  function solutionModal() {
+    var options = solutions.map(function (solution) {
+      return "<option>" + escapeHtml(solution) + "</option>";
+    }).join("");
+    openModal(
+      "Finalização sem troca de peça",
+      "Selecionar solução aplicada",
+      "<p class=\"modal-copy\">Escolha a solução que resolveu o problema. Ela ficará registrada no histórico do reparo.</p>" +
+      "<div class=\"form-stack\">" +
+        "<label class=\"field problem-field\">Solução aplicada" +
+          "<select id=\"repair-solution\">" + options + "</select>" +
+          "<button class=\"inline-link\" type=\"button\" data-action=\"add-solution\">+ Cadastrar outra solução</button>" +
+        "</label>" +
+        "<label class=\"field\">Observação (opcional)<textarea id=\"repair-solution-notes\" placeholder=\"Detalhes úteis do procedimento\"></textarea></label>" +
+      "</div>" +
+      "<div class=\"modal-actions\">" +
+        "<button class=\"button\" value=\"cancel\">Cancelar</button>" +
+        "<button class=\"button button--primary\" type=\"button\" data-action=\"confirm-solution\">Finalizar reparo</button>" +
+      "</div>"
+    );
+  }
+
+  function addSolutionModal() {
+    openModal(
+      "Cadastro rápido",
+      "Nova solução",
+      "<div class=\"form-stack\"><label>Nome da solução<input id=\"solution-name\" placeholder=\"Ex.: Reencaixe do conector 24 pinos\"></label></div>" +
+      "<div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-solution\">Cadastrar solução</button></div>"
+    );
+  }
+
   function acquisitionModal() {
     var options = parts.map(function (part) { return "<option value=\"" + escapeHtml(part.code) + "\">" + escapeHtml(part.code + " — " + part.description) + "</option>"; }).join("");
     openModal("Aquisição de peça","Selecionar peça","<div class=\"form-stack\"><label>Peça cadastrada<select id=\"repair-part\">" + options + "</select></label><label>Observação<textarea id=\"repair-part-notes\" placeholder=\"Motivo da troca ou detalhe da aquisição\"></textarea></label><button class=\"inline-link\" type=\"button\" data-action=\"open-parts\">+ A peça não existe? Cadastrar agora</button></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"confirm-part\">Iniciar aquisição</button></div>");
