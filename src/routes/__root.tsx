@@ -85,13 +85,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:description", content: "Centro de operação GPJ: Montagem, Assistência, RMA, KVM, BurnIn e rastreabilidade em uma interface integrada." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "GPJ Flow — Operação Integrada" },
+      { name: "twitter:description", content: "Centro de operação GPJ: Montagem, Assistência, RMA, KVM, BurnIn e rastreabilidade em uma interface integrada." },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/f52809c9-0660-43c3-8282-2bdc02d08312" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/f52809c9-0660-43c3-8282-2bdc02d08312" },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],
   }),
   shellComponent: RootShell,
