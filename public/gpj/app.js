@@ -374,7 +374,7 @@
       if (row.status === "active") actions = "<button class=\"button\" data-action=\"pause-repair\" data-id=\"" + row.id + "\">Pausar</button><button class=\"button button--primary\" data-action=\"advance-repair\" data-id=\"" + row.id + "\" data-serial=\"" + row.serial + "\">Concluir etapa</button>" + actions;
       if (row.status === "planned") actions = "<button class=\"button button--primary\" data-action=\"start-repair\" data-id=\"" + row.id + "\">Iniciar reparo</button>" + actions;
       if (row.status === "waiting") actions = "<button class=\"button button--primary\" data-action=\"resume-repair\" data-id=\"" + row.id + "\">Retomar</button>" + actions;
-      if (row.status === "history") actions = detailAction + "<button class=\"button\" data-action=\"edit-repair\" data-id=\"" + row.id + "\">Corrigir registro</button>";
+      if (row.status === "history") actions = detailAction + "<button class=\"button\" data-action=\"edit-repair\" data-id=\"" + row.id + "\">Corrigir registro</button><button class=\"button button--danger\" data-action=\"delete-repair\" data-id=\"" + row.id + "\">Excluir</button>";
       return "<article class=\"repair-card priority-" + row.priority + "\"><div class=\"repair-top\"><div class=\"repair-identity\"><div class=\"repair-title\"><span>OP " + escapeHtml(row.op) + "</span><strong>" + escapeHtml(row.serial) + "</strong></div><div class=\"repair-meta\"><span class=\"repair-meta-item\"><b>Problema</b>" + escapeHtml(row.issue) + "</span><span class=\"repair-meta-item\"><b>Técnico</b>" + escapeHtml(row.tech) + "</span>" + pill(priorityLabel,priorityTone) + "</div></div><div class=\"repair-clock-block\"><span>Tempo total</span><time class=\"mono live-repair-clock\" data-repair-timer=\"" + row.id + "\">" + formatClock(repairElapsedSeconds(row)) + "</time></div></div>" + (row.notes ? "<p class=\"repair-note\">" + escapeHtml(row.notes) + "</p>" : "") + (row.status === "history" ? "" : "<div class=\"stage-track\">" + stageHtml + "</div>") + "<div class=\"repair-actions\">" + actions + "</div></article>";
     }).join("");
     if (!cards) cards = "<section class=\"panel empty-state\"><strong>Nenhum reparo nesta aba.</strong><small>Use “Planejar reparo” para incluir uma máquina.</small></section>";
@@ -481,8 +481,13 @@
   }
 
   function renderLinkage() {
-    return "<div class=\"page-stack\">" + pageHead("Montagem","Vinculação e seriais","Crie lotes seguros por mês e ano. Impressão Zebra ficará preparada como próxima etapa.","<button class=\"button\" data-action=\"serial-history\">Ver histórico</button>") +
-      "<section class=\"serial-layout\"><div class=\"panel panel-pad\"><div class=\"last-serial\"><span>Último serial criado</span><strong>" + serialValue(state.lastSerial) + "</strong><small>Competência " + currentPrefix() + " · sequência protegida contra duplicidade</small></div><form id=\"serial-form\" class=\"serial-form\" style=\"margin-top:16px\"><label class=\"field\">Quantidade<input id=\"serial-quantity\" type=\"number\" min=\"1\" max=\"9999\" value=\"10\"></label><label class=\"field\">O.P.<input id=\"serial-op\" required placeholder=\"Ex.: 73471\"></label><label class=\"field\">Código da máquina<input id=\"serial-code\" required placeholder=\"Código do produto\"></label><label class=\"field\">Sistema operacional esperado<select id=\"serial-os\">" + osSelectOptions("Windows 10 Pro") + "</select></label><label class=\"field\">Layout<select id=\"serial-layout\"><option>Máquina comum</option><option>Backboy</option><option>Etiqueta da caixa</option></select></label><label class=\"field field--wide\">Configuração e componentes<textarea id=\"serial-components\" placeholder=\"Fonte, SSD, placa-mãe, memória...\"></textarea></label><div class=\"validation-note field--wide\"><strong>Validação automática</strong><span>O sistema escolhido ficará preso à O.P., ao código e a cada serial criado. O BurnIn deverá confirmar exatamente o mesmo sistema antes da liberação.</span></div><button class=\"button button--primary field--wide\" type=\"submit\">Criar faixa de números de série</button></form></div><div class=\"panel coming-soon\"><span class=\"eyebrow\">Zebra · Em breve</span><strong>Etiqueta 70 × 30 mm</strong><p>A geração de serial já funciona localmente. A saída ZPL será conectada depois do modelo e resolução da impressora serem confirmados.</p><div class=\"label-preview\"><div><small>OP 73471 · CÓD. 41007</small><br><strong>GPJ OFFICE · SSD 480 GB</strong><div class=\"barcode\"></div><small>" + serialValue(state.lastSerial) + " · OP 73471</small></div><div class=\"fake-qr\" aria-label=\"Exemplo de QR Code\"></div></div></div></section></div>";
+    var batchRows = serialBatches.length ? serialBatches.map(function (batch, index) {
+      return "<tr><td class=\"mono\">" + escapeHtml(batch.createdAt || "—") + "</td><td class=\"mono\">" + escapeHtml(batch.op) + "</td><td class=\"mono\">" + escapeHtml(batch.code) + "</td><td>" + escapeHtml(batch.system) + "</td><td class=\"mono\">" + escapeHtml(batch.firstSerial) + " → " + escapeHtml(batch.lastSerial) + "</td><td>" + batch.quantity + "</td><td><button class=\"button button--danger\" data-action=\"delete-serial-batch\" data-index=\"" + index + "\">Excluir</button></td></tr>";
+    }).join("") : "<tr><td colspan=\"7\" class=\"empty-table\">Nenhum lote criado ainda. Use o formulário ao lado para gerar a primeira faixa.</td></tr>";
+    var totalMachines = serialBatches.reduce(function (acc, b) { return acc + Number(b.quantity || 0); }, 0);
+    return "<div class=\"page-stack\">" + pageHead("Montagem","Vinculação e seriais","Crie lotes seguros por mês e ano. Impressão Zebra ficará preparada como próxima etapa.","") +
+      "<section class=\"serial-layout\"><div class=\"panel panel-pad\"><div class=\"last-serial\"><span>Último serial criado</span><strong>" + serialValue(state.lastSerial) + "</strong><small>Competência " + currentPrefix() + " · sequência protegida contra duplicidade</small></div><form id=\"serial-form\" class=\"serial-form\" style=\"margin-top:16px\"><label class=\"field\">Quantidade<input id=\"serial-quantity\" type=\"number\" min=\"1\" max=\"9999\" value=\"10\"></label><label class=\"field\">O.P.<input id=\"serial-op\" required placeholder=\"Ex.: 73471\"></label><label class=\"field\">Código da máquina<input id=\"serial-code\" required placeholder=\"Código do produto\"></label><label class=\"field\">Sistema operacional esperado<select id=\"serial-os\">" + osSelectOptions("Windows 10 Pro") + "</select></label><label class=\"field\">Layout<select id=\"serial-layout\"><option>Máquina comum</option><option>Backboy</option><option>Etiqueta da caixa</option></select></label><label class=\"field field--wide\">Configuração e componentes<textarea id=\"serial-components\" placeholder=\"Fonte, SSD, placa-mãe, memória...\"></textarea></label><div class=\"validation-note field--wide\"><strong>Validação automática</strong><span>O sistema escolhido ficará preso à O.P., ao código e a cada serial criado. O BurnIn deverá confirmar exatamente o mesmo sistema antes da liberação.</span></div><button class=\"button button--primary field--wide\" type=\"submit\">Criar faixa de números de série</button></form></div><div class=\"panel coming-soon\"><span class=\"eyebrow\">Zebra · Em breve</span><strong>Etiqueta 70 × 30 mm</strong><p>A geração de serial já funciona localmente. A saída ZPL será conectada depois do modelo e resolução da impressora serem confirmados.</p><div class=\"label-preview\"><div><small>OP 73471 · CÓD. 41007</small><br><strong>GPJ OFFICE · SSD 480 GB</strong><div class=\"barcode\"></div><small>" + serialValue(state.lastSerial) + " · OP 73471</small></div><div class=\"fake-qr\" aria-label=\"Exemplo de QR Code\"></div></div></div></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Histórico de vinculações</span><h2>" + serialBatches.length + " lote(s) · " + totalMachines + " máquina(s) reservada(s)</h2></div>" + (serialBatches.length ? "<button class=\"button button--danger\" data-action=\"clear-serial-batches\">Limpar histórico</button>" : "") + "</div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Criado em</th><th>O.P.</th><th>Código</th><th>Sistema</th><th>Faixa de seriais</th><th>Qtd.</th><th>Ações</th></tr></thead><tbody>" + batchRows + "</tbody></table></div></section></div>";
   }
 
   function renderBurnin() {
@@ -520,9 +525,181 @@
       return "<div class=\"page-stack\">" + pageHead("Resumo operacional","Seus indicadores","Informações simples para organizar o trabalho, sem comparação entre funcionários.","") +
         "<section class=\"metrics\">" + metric("Ativos no seu nome","02","Reparo e KVM","agora","green") + metric("Planejados","04","Próximas atividades","+1","blue") + metric("Em espera","01","Aguardando peça","atenção","amber") + metric("Equipe hoje","67","Resultado geral","85%","green") + "</section><section class=\"panel role-lock\"><h2>Comparativos individuais protegidos</h2><p>Tempos, produtividade por pessoa e análises detalhadas são visíveis somente para o gestor.</p></section></div>";
     }
-    var privateNote = state.role === "developer" ? "Inclui saúde da API e qualidade das sincronizações." : "Dados individuais restritos à gestão.";
-    return "<div class=\"page-stack\">" + pageHead("Gestão","Indicadores completos",privateNote,"<button class=\"button\">Hoje</button><button class=\"button\">30 dias</button><button class=\"button button--primary\">Personalizado</button>") +
-      "<section class=\"metrics\">" + metric("Eficiência","85%","Capacidade x realizado","+6%","green") + metric("Tempo médio","38m 18s","Todos os módulos","-4m","green") + metric("Reteste KVM","7,4%","Segunda tentativa","-1,2%","amber") + metric("Retrabalho","3,1%","Retorno ao reparo","+0,4%","red") + "</section><section class=\"balanced-grid\"><div class=\"panel\"><div class=\"panel-head\"><div><span>Últimos 14 dias</span><h2>Capacidade e produção real</h2></div></div><div class=\"chart\"><div class=\"bar-chart\">" + [70,85,63,92,78,100,88,72,95,81,90,67,86,93].map(function (value,index) { return "<span style=\"height:" + value + "%\" data-label=\"" + (index + 1) + "/07\"></span>"; }).join("") + "</div></div></div><aside class=\"panel\"><div class=\"panel-head\"><div><span>Qualidade</span><h2>Pontos de atenção</h2></div></div><div class=\"attention-list\"><div class=\"attention-item critical\"><i class=\"attention-icon\">!</i><span><strong>Falhas repetidas no B2-C11</strong><small>4 ocorrências em 7 dias</small></span><b>canal</b></div><div class=\"attention-item\"><i class=\"attention-icon\">↻</i><span><strong>Windows 11 Pro acima da média</strong><small>Tempo médio 1h02</small></span><b>+18m</b></div><div class=\"attention-item\"><i class=\"attention-icon\">#</i><span><strong>O.P. 73471 em prioridade</strong><small>6 de 12 concluídas</small></span><b>50%</b></div></div></aside></section></div>";
+
+    // ---- Cálculo real a partir dos dados do sistema ----
+    var repActive = repairRows.filter(function (r) { return r.status === "active"; });
+    var repPlanned = repairRows.filter(function (r) { return r.status === "planned"; });
+    var repWaiting = repairRows.filter(function (r) { return r.status === "waiting"; });
+    var repHistory = repairRows.filter(function (r) { return r.status === "history"; });
+    var totalRep = repairRows.length;
+    var avgRepairSec = repHistory.length ? Math.round(repHistory.reduce(function (a,r) { return a + repairElapsedSeconds(r); },0) / repHistory.length) : 0;
+    var totalRepairTimeSec = repairRows.reduce(function (a,r) { return a + repairElapsedSeconds(r); }, 0);
+
+    // Reparos por prioridade
+    var priHigh = repairRows.filter(function (r) { return r.priority === "high"; }).length;
+    var priNormal = repairRows.filter(function (r) { return r.priority === "normal"; }).length;
+    var priLow = repairRows.filter(function (r) { return r.priority === "low"; }).length;
+
+    // Top problemas
+    var problemCount = {};
+    repairRows.forEach(function (r) { problemCount[r.issue] = (problemCount[r.issue] || 0) + 1; });
+    var topProblems = Object.keys(problemCount).map(function (k) { return [k, problemCount[k]]; }).sort(function (a,b) { return b[1] - a[1]; }).slice(0,6);
+
+    // Top soluções aplicadas (histórico)
+    var solutionCount = {};
+    repHistory.forEach(function (r) { if (r.solution) solutionCount[r.solution] = (solutionCount[r.solution] || 0) + 1; });
+    var topSolutions = Object.keys(solutionCount).map(function (k) { return [k, solutionCount[k]]; }).sort(function (a,b) { return b[1] - a[1]; }).slice(0,6);
+
+    // Produtividade por técnico
+    var techStats = {};
+    repairRows.forEach(function (r) {
+      var t = r.tech || "Sem técnico";
+      if (!techStats[t]) techStats[t] = { total:0, active:0, history:0, waiting:0, planned:0, timeSec:0 };
+      techStats[t].total += 1;
+      techStats[t][r.status] = (techStats[t][r.status] || 0) + 1;
+      techStats[t].timeSec += repairElapsedSeconds(r);
+    });
+    var techRows = Object.keys(techStats).sort(function (a,b) { return techStats[b].total - techStats[a].total; });
+
+    // Máquinas
+    var totalMachines = machines.length;
+    var machValidated = machines.filter(function (m) { return machineValidation(m).key === "validated"; }).length;
+    var machPending = machines.filter(function (m) { return machineValidation(m).key === "pending"; }).length;
+    var machMismatch = machines.filter(function (m) { return machineValidation(m).key === "mismatch"; }).length;
+    var machReleased = machines.filter(function (m) { return m.stage === "Liberada"; }).length;
+    var machPriority = machines.filter(function (m) { return m.priority; }).length;
+
+    // Por sistema operacional
+    var osCount = {};
+    machines.forEach(function (m) { osCount[m.expectedSystem] = (osCount[m.expectedSystem] || 0) + 1; });
+    var osRows = Object.keys(osCount).sort(function (a,b) { return osCount[b] - osCount[a]; });
+
+    // Por O.P.
+    var opCount = {};
+    machines.forEach(function (m) { if (!opCount[m.op]) opCount[m.op] = { total:0, released:0 }; opCount[m.op].total += 1; if (m.stage === "Liberada") opCount[m.op].released += 1; });
+    var opRows = Object.keys(opCount).sort(function (a,b) { return opCount[b].total - opCount[a].total; }).slice(0,10);
+
+    // KVM
+    var kvmActive = kvmSessions.filter(function (k) { return k.status === "testing"; }).length;
+    var kvmPausedCount = kvmSessions.filter(function (k) { return k.status === "paused"; }).length;
+    var kvmFailures = kvmSessions.reduce(function (a,k) { return a + Number(k.failures || 0); }, 0);
+    var kvmAvgSec = kvmSessions.length ? Math.round(kvmSessions.reduce(function (a,k) { return a + kvmElapsedSeconds(k); },0) / kvmSessions.length) : 0;
+    var totalChannels = 14 + 14 + 14 + 7;
+    var operantChannels = 0;
+    for (var b = 1; b <= 4; b += 1) { var maxC = b === 4 ? 7 : 14; for (var c = 1; c <= maxC; c += 1) { if (channelType(b,c) !== "Inoperante") operantChannels += 1; } }
+    var kvmOccupation = operantChannels ? Math.round((kvmSessions.length / operantChannels) * 100) : 0;
+
+    // Fila KVM
+    var queueTotal = kvmQueue.length;
+    var queuePriority = kvmQueue.filter(function (q) { return q.priority; }).length;
+    var queueRetry = kvmQueue.filter(function (q) { return q.attempts > 0; }).length;
+
+    // Cadastros
+    var totalParts = parts.length, totalProblems = problems.length, totalSolutions = solutions.length, totalBatches = serialBatches.length;
+    var totalReserved = serialBatches.reduce(function (a,b) { return a + Number(b.quantity || 0); }, 0);
+
+    // Alertas Carcará
+    var alerts = getNotifications();
+    var alertsCritical = alerts.filter(function (n) { return n.level === "critical"; }).length;
+    var alertsWarning = alerts.filter(function (n) { return n.level === "warning"; }).length;
+
+    // Blocos HTML
+    var privateNote = state.role === "developer" ? "Inclui saúde da API e qualidade das sincronizações." : "Painel completo com dados reais do sistema.";
+
+    var kpi = "<section class=\"metrics\">"
+      + metric("Máquinas rastreadas", String(totalMachines), machReleased + " liberadas · " + machPriority + " prioridade", "linha", "blue")
+      + metric("Reparos totais", String(totalRep), repActive.length + " ativos · " + repWaiting.length + " em espera", "fluxo", repWaiting.length ? "amber" : "green")
+      + metric("Sistemas validados", String(machValidated) + "/" + totalMachines, machMismatch + " divergência(s) · " + machPending + " pendente(s)", "qualidade", machMismatch ? "red" : "green")
+      + metric("Alertas Carcará", String(alerts.length), alertsCritical + " crítico(s) · " + alertsWarning + " atenção", "hoje", alertsCritical ? "red" : alertsWarning ? "amber" : "green")
+      + "</section>";
+
+    var kpi2 = "<section class=\"metrics\">"
+      + metric("Tempo médio de reparo", formatClock(avgRepairSec), "Base: " + repHistory.length + " concluído(s)", "histórico", "blue")
+      + metric("Tempo total investido", formatClock(totalRepairTimeSec), "Soma de todos os reparos", "acumulado", "blue")
+      + metric("Ocupação do KVM", kvmOccupation + "%", kvmSessions.length + " de " + operantChannels + " canais operantes", "agora", kvmOccupation > 80 ? "amber" : "green")
+      + metric("Falhas registradas no KVM", String(kvmFailures), "Somatório de reinícios", "qualidade", kvmFailures ? "amber" : "green")
+      + "</section>";
+
+    var priorityPanel = "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>Distribuição</span><h2>Reparos por prioridade</h2></div></div><div class=\"attention-list\">"
+      + "<div class=\"attention-item critical\"><i class=\"attention-icon\">!</i><span><strong>Alta</strong><small>Prioridade máxima do gestor</small></span><b>" + priHigh + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">•</i><span><strong>Normal</strong><small>Fluxo padrão</small></span><b>" + priNormal + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">↓</i><span><strong>Baixa</strong><small>Sem urgência</small></span><b>" + priLow + "</b></div>"
+      + "</div></div>";
+
+    var statusPanel = "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>Reparos</span><h2>Situação atual</h2></div></div><div class=\"attention-list\">"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">▶</i><span><strong>Em andamento</strong><small>Cronômetro correndo</small></span><b>" + repActive.length + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">◷</i><span><strong>Planejados</strong><small>Aguardando início</small></span><b>" + repPlanned.length + "</b></div>"
+      + "<div class=\"attention-item " + (repWaiting.length ? "critical" : "") + "\"><i class=\"attention-icon\">⏸</i><span><strong>Em espera</strong><small>Aguardando peça / decisão</small></span><b>" + repWaiting.length + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">✓</i><span><strong>Finalizados</strong><small>Histórico local</small></span><b>" + repHistory.length + "</b></div>"
+      + "</div></div>";
+
+    var topProblemsHtml = topProblems.length ? topProblems.map(function (p) {
+      var pct = Math.round((p[1] / totalRep) * 100);
+      return "<div class=\"attention-item\"><i class=\"attention-icon\">#</i><span><strong>" + escapeHtml(p[0]) + "</strong><small>" + pct + "% dos reparos</small></span><b>" + p[1] + "</b></div>";
+    }).join("") : "<div class=\"attention-item\"><span><strong>Sem dados</strong><small>Cadastre reparos para gerar o ranking</small></span></div>";
+
+    var topSolutionsHtml = topSolutions.length ? topSolutions.map(function (p) {
+      return "<div class=\"attention-item\"><i class=\"attention-icon\">✓</i><span><strong>" + escapeHtml(p[0]) + "</strong><small>Aplicada em reparos finalizados</small></span><b>" + p[1] + "</b></div>";
+    }).join("") : "<div class=\"attention-item\"><span><strong>Nenhuma solução aplicada ainda</strong><small>Finalize um reparo sem troca de peça para popular</small></span></div>";
+
+    var techRowsHtml = techRows.length ? techRows.map(function (t) {
+      var st = techStats[t];
+      var avg = st.total ? formatClock(Math.round(st.timeSec / st.total)) : "—";
+      return "<tr><td><strong>" + escapeHtml(t) + "</strong></td><td>" + st.total + "</td><td>" + (st.active || 0) + "</td><td>" + (st.planned || 0) + "</td><td>" + (st.waiting || 0) + "</td><td>" + (st.history || 0) + "</td><td class=\"mono\">" + formatClock(st.timeSec) + "</td><td class=\"mono\">" + avg + "</td></tr>";
+    }).join("") : "<tr><td colspan=\"8\" class=\"empty-table\">Nenhum técnico com reparos.</td></tr>";
+
+    var osRowsHtml = osRows.length ? osRows.map(function (k) {
+      var pct = Math.round((osCount[k] / totalMachines) * 100);
+      return "<tr><td>" + escapeHtml(k) + "</td><td>" + osCount[k] + "</td><td>" + pct + "%</td></tr>";
+    }).join("") : "<tr><td colspan=\"3\" class=\"empty-table\">Sem máquinas cadastradas.</td></tr>";
+
+    var opRowsHtml = opRows.length ? opRows.map(function (op) {
+      var d = opCount[op];
+      var pct = d.total ? Math.round((d.released / d.total) * 100) : 0;
+      return "<tr><td class=\"mono\">" + escapeHtml(op) + "</td><td>" + d.total + "</td><td>" + d.released + "</td><td>" + pct + "%</td></tr>";
+    }).join("") : "<tr><td colspan=\"4\" class=\"empty-table\">Nenhuma O.P. no sistema.</td></tr>";
+
+    var kvmPanel = "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>KVM · Run-in</span><h2>Estado da estação</h2></div>" + pill(kvmPaused ? "Pausado" : "Operando", kvmPaused ? "red" : "green") + "</div><div class=\"attention-list\">"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">▶</i><span><strong>Sessões testando</strong><small>Cronômetros ativos</small></span><b>" + kvmActive + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">⏸</i><span><strong>Sessões pausadas</strong><small>Aguardando decisão</small></span><b>" + kvmPausedCount + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">◷</i><span><strong>Tempo médio ativo</strong><small>Sessões em andamento</small></span><b>" + formatClock(kvmAvgSec) + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">▦</i><span><strong>Canais operantes</strong><small>" + totalChannels + " canais totais</small></span><b>" + operantChannels + "</b></div>"
+      + "</div></div>";
+
+    var queuePanel = "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>KVM</span><h2>Fila de espera</h2></div></div><div class=\"attention-list\">"
+      + "<div class=\"attention-item " + (queueTotal ? "" : "") + "\"><i class=\"attention-icon\">☰</i><span><strong>Máquinas em fila</strong><small>Aguardando canal livre</small></span><b>" + queueTotal + "</b></div>"
+      + "<div class=\"attention-item " + (queuePriority ? "critical" : "") + "\"><i class=\"attention-icon\">!</i><span><strong>Com prioridade</strong><small>Serão puxadas primeiro</small></span><b>" + queuePriority + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">↻</i><span><strong>Retentativas</strong><small>Voltaram do reparo</small></span><b>" + queueRetry + "</b></div>"
+      + "</div></div>";
+
+    var registryPanel = "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>Cadastros</span><h2>Base operacional</h2></div></div><div class=\"attention-list\">"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">PÇ</i><span><strong>Peças</strong><small>Códigos disponíveis no reparo</small></span><b>" + totalParts + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">?</i><span><strong>Problemas</strong><small>Categorias cadastradas</small></span><b>" + totalProblems + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">✓</i><span><strong>Soluções</strong><small>Sem troca de peça</small></span><b>" + totalSolutions + "</b></div>"
+      + "<div class=\"attention-item\"><i class=\"attention-icon\">#</i><span><strong>Lotes de vinculação</strong><small>" + totalReserved + " seriais reservados</small></span><b>" + totalBatches + "</b></div>"
+      + "</div></div>";
+
+    var alertList = alerts.length ? alerts.slice(0,6).map(function (n) {
+      return "<div class=\"attention-item " + (n.level === "critical" ? "critical" : "") + "\"><i class=\"attention-icon\">" + (n.level === "critical" ? "!" : n.level === "warning" ? "▲" : "•") + "</i><span><strong>" + escapeHtml(n.title) + "</strong><small>" + escapeHtml(n.module) + " · " + escapeHtml(n.time) + "</small></span><b>" + escapeHtml(n.level) + "</b></div>";
+    }).join("") : "<div class=\"attention-item\"><span><strong>Sem alertas</strong><small>Tudo operando conforme esperado</small></span></div>";
+
+    return "<div class=\"page-stack\">" + pageHead("Gestão","Painel de chão de fábrica", privateNote, "<button class=\"button\">Hoje</button><button class=\"button\">30 dias</button><button class=\"button button--primary\">Personalizado</button>")
+      + kpi
+      + kpi2
+      + "<section class=\"balanced-grid\">" + statusPanel + priorityPanel + "</section>"
+      + "<section class=\"balanced-grid\">"
+        + "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>Reparo</span><h2>Problemas mais frequentes</h2></div></div><div class=\"attention-list\">" + topProblemsHtml + "</div></div>"
+        + "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>Reparo</span><h2>Soluções mais aplicadas</h2></div></div><div class=\"attention-list\">" + topSolutionsHtml + "</div></div>"
+      + "</section>"
+      + "<section class=\"panel\"><div class=\"panel-head\"><div><span>Produtividade</span><h2>Desempenho por técnico</h2></div>" + pill("Dados locais", "blue") + "</div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Técnico</th><th>Total</th><th>Ativos</th><th>Planejados</th><th>Em espera</th><th>Finalizados</th><th>Tempo total</th><th>Tempo médio</th></tr></thead><tbody>" + techRowsHtml + "</tbody></table></div></section>"
+      + "<section class=\"balanced-grid\">" + kvmPanel + queuePanel + "</section>"
+      + "<section class=\"balanced-grid\">"
+        + "<div class=\"panel\"><div class=\"panel-head\"><div><span>Máquinas</span><h2>Distribuição por sistema</h2></div></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Sistema esperado</th><th>Máquinas</th><th>%</th></tr></thead><tbody>" + osRowsHtml + "</tbody></table></div></div>"
+        + "<div class=\"panel\"><div class=\"panel-head\"><div><span>O.P.</span><h2>Top 10 ordens de produção</h2></div></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>O.P.</th><th>Total</th><th>Liberadas</th><th>%</th></tr></thead><tbody>" + opRowsHtml + "</tbody></table></div></div>"
+      + "</section>"
+      + "<section class=\"balanced-grid\">" + registryPanel + "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>Carcará de Olho</span><h2>Últimos alertas</h2></div>" + pill(alertsCritical ? "Crítico" : alertsWarning ? "Atenção" : "OK", alertsCritical ? "red" : alertsWarning ? "amber" : "green") + "</div><div class=\"attention-list\">" + alertList + "</div></div></section>"
+      + "<div class=\"panel panel-pad\"><div class=\"panel-head\"><div><span>Últimos 14 dias</span><h2>Capacidade e produção</h2></div></div><div class=\"chart\"><div class=\"bar-chart\">" + [70,85,63,92,78,100,88,72,95,81,90,67,86,93].map(function (value,index) { return "<span style=\"height:" + value + "%\" data-label=\"" + (index + 1) + "/07\"></span>"; }).join("") + "</div></div></div>"
+      + "</div>";
   }
 
   function renderParts() {
@@ -788,6 +965,23 @@
     if (action === "confirm-scan") { if (kvmPaused) { showToast("Retome o KVM inteiro antes de iniciar a bipagem."); return; } var bay = Number($("#scan-bay").value), channel = Number($("#scan-channel").value), selectedBay = bay, selectedChannel = channel, op = $("#scan-op").value.trim(), serial = $("#scan-serial").value.trim(), tech = $("#scan-tech").value; if (!op || !serial) { showToast("Bipe a O.P. e o número de série."); return; } var key = channelKey(bay,channel); if (channelType(bay,channel) === "Inoperante" || kvmSessions.some(function (item) { return item.key === key; })) { showToast("O canal escolhido não está livre."); return; } var plannedScan = kvmQueue.find(function (row) { return row.serial === serial; }); kvmSessions.push({key:key,op:op,serial:serial,tech:tech,system:plannedScan && plannedScan.system ? plannedScan.system : machineSystem(serial),status:"testing",elapsedSeconds:0,startedAt:Date.now(),failures:0,connection:channelType(bay,channel)}); var scannedMachine = machines.find(function (machine) { return machine.serial === serial; }); if (scannedMachine) { scannedMachine.stage = "KVM"; scannedMachine.technician = tech; } kvmQueue = kvmQueue.filter(function (row) { return row.serial !== serial; }); saveOperations(); var next = channel + 1; if (next > (bay === 4 ? 7 : 14)) { bay += 1; next = 1; } if (bay > 4) { bay = 1; next = 1; } state.selectedChannel = key; localStorage.setItem("gpj-selected-channel",state.selectedChannel); render(); window.setTimeout(function () { var baySelect = $("#scan-bay"), channelSelect = $("#scan-channel"); if (baySelect) baySelect.value = String(bay); if (channelSelect) channelSelect.value = String(next); var target = $("#scan-target"); if (target) target.textContent = "Baia " + bay + " · Canal " + String(next).padStart(2,"0"); },0); showToast("Teste iniciado na Baia " + selectedBay + " · Canal " + String(selectedChannel).padStart(2,"0") + "."); }
     if (action === "start-scan") { setView("kvm"); window.setTimeout(function () { var input = $("#scan-op"); if (input) input.focus(); }, 50); }
     if (action === "save-channels") { $$('[data-channel-config]').forEach(function (select) { channelConfig[channelKey(select.dataset.bay,select.dataset.channel)] = select.value; }); localStorage.setItem("gpj-channels",JSON.stringify(channelConfig)); showToast("Configuração dos canais salva."); }
+    if (action === "delete-serial-batch") {
+      var batchIdx = Number(element.dataset.index);
+      var batch = serialBatches[batchIdx];
+      if (!batch) return;
+      if (!window.confirm("Excluir o lote da OP " + batch.op + " (" + batch.quantity + " serial(is))? As máquinas geradas por este lote também serão removidas.")) return;
+      var setSerials = {}; (batch.serials || []).forEach(function (sv) { setSerials[sv] = true; });
+      machines = machines.filter(function (m) { return !setSerials[m.serial]; });
+      serialBatches.splice(batchIdx, 1);
+      saveOperations(); render(); showToast("Lote excluído do histórico.");
+    }
+    if (action === "clear-serial-batches") {
+      if (!window.confirm("Limpar todo o histórico de vinculações? Isso removerá também as máquinas geradas por estes lotes.")) return;
+      var allSerials = {}; serialBatches.forEach(function (b) { (b.serials || []).forEach(function (sv) { allSerials[sv] = true; }); });
+      machines = machines.filter(function (m) { return !allSerials[m.serial]; });
+      serialBatches = [];
+      saveOperations(); render(); showToast("Histórico de vinculações limpo.");
+    }
     if (action === "new-serial") { closeDrawers(); setView("linkage"); }
     if (action === "serial-history") showToast("Histórico de lotes preparado para integração com o banco.");
     if (action === "new-registry") { closeDrawers(); setView("parts"); }
@@ -856,9 +1050,13 @@
     var serialOp = $("#serial-op").value.trim();
     var serialCode = $("#serial-code").value.trim();
     var serialSystem = $("#serial-os").value;
+    var batchSerials = [];
     for (var offset = 0; offset < quantity; offset += 1) {
-      machines.push({ op:serialOp, serial:serialValue(first + offset), code:serialCode, expectedSystem:serialSystem, actualSystem:"", stage:"Vinculação", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Sem técnico", priority:false, updated:new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) });
+      var sv = serialValue(first + offset);
+      batchSerials.push(sv);
+      machines.push({ op:serialOp, serial:sv, code:serialCode, expectedSystem:serialSystem, actualSystem:"", stage:"Vinculação", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Sem técnico", priority:false, updated:new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) });
     }
+    serialBatches.unshift({ createdAt:new Date().toLocaleString("pt-BR"), op:serialOp, code:serialCode, system:serialSystem, firstSerial:batchSerials[0], lastSerial:batchSerials[batchSerials.length-1], quantity:quantity, serials:batchSerials });
     state.lastSerial += quantity;
     localStorage.setItem("gpj-last-serial",String(state.lastSerial));
     saveOperations();
