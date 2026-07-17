@@ -29,6 +29,20 @@
   };
 
   var defaultProblems = ["Não liga","Não reconhece HD","Gabinete danificado","Falha de vídeo","Falha de áudio","Falha LAN","Falha de memória","Falha no cooler","Sistema corrompido","SSD com defeito","Superaquecimento","Travando","USB com defeito"];
+  var defaultSolutions = [
+    "Limpeza interna e reaplicação de pasta térmica",
+    "Reencaixe de memórias RAM",
+    "Reencaixe de cabos SATA / alimentação",
+    "Atualização/Reset da BIOS",
+    "Reinstalação do sistema operacional",
+    "Atualização de drivers",
+    "Reaperto do dissipador / cooler",
+    "Reencaixe da placa de vídeo",
+    "Reset da CMOS",
+    "Ajuste de configuração no setup",
+    "Reencaixe do painel frontal",
+    "Sem defeito constatado"
+  ];
   var defaultParts = [
     { code:"11773", description:"MEMÓRIA DDR3" },
     { code:"26322", description:"Memória" },
@@ -45,6 +59,7 @@
   ];
   function loadLocal(key, fallback) { try { var value = JSON.parse(localStorage.getItem(key)); return Array.isArray(value) ? value : fallback; } catch (error) { return fallback; } }
   var problems = loadLocal("gpj-problems", defaultProblems);
+  var solutions = loadLocal("gpj-solutions", defaultSolutions);
   var parts = loadLocal("gpj-parts", defaultParts);
   var repairRows = loadLocal("gpj-repairs", defaultRepairs);
   var defaultMachines = [
@@ -66,6 +81,7 @@
   var kvmPaused = localStorage.getItem("gpj-kvm-global-paused") === "true";
   function saveOperations() {
     localStorage.setItem("gpj-problems", JSON.stringify(problems));
+    localStorage.setItem("gpj-solutions", JSON.stringify(solutions));
     localStorage.setItem("gpj-parts", JSON.stringify(parts));
     localStorage.setItem("gpj-repairs", JSON.stringify(repairRows));
     localStorage.setItem("gpj-machines", JSON.stringify(machines));
