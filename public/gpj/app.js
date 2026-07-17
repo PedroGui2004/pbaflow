@@ -87,6 +87,7 @@
     localStorage.setItem("gpj-machines", JSON.stringify(machines));
     localStorage.setItem("gpj-kvm-sessions", JSON.stringify(kvmSessions));
     localStorage.setItem("gpj-kvm-queue", JSON.stringify(kvmQueue));
+    localStorage.setItem("gpj-serial-batches", JSON.stringify(serialBatches));
   }
   var channelConfig = JSON.parse(localStorage.getItem("gpj-channels") || "{}");
   function channelKey(bay, channel) { return "B" + bay + "C" + channel; }
@@ -111,6 +112,7 @@
     { op:"73521", serial:"GPJX3621", origin:"BIOS", priority:false, attempts:0, system:"Linux" }
   ];
   var kvmQueue = loadLocal("gpj-kvm-queue",defaultKvmQueue);
+  var serialBatches = loadLocal("gpj-serial-batches", []);
   var burninTemperatures = { GPJX3520:"66,9 °C", GPJX3519:"74,7 °C", GPJX3571:"63,2 °C", GPJX3522:"61,8 °C" };
   var osOptions = ["Linux","Windows 10 Home","Windows 10 Pro","Windows 11 Home","Windows 11 Pro"];
 
