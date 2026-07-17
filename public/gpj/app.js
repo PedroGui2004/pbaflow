@@ -1,0 +1,801 @@
+(function () {
+  "use strict";
+
+  var roleLabels = {
+    technician: { name: "Técnico", label: "Operação" },
+    manager: { name: "Gestor", label: "Administração" },
+    developer: { name: "Desenvolvedor", label: "DEV · Integração" }
+  };
+  var sectorLabels = { assembly: "Montagem", assistance: "Assistência", rma: "RMA" };
+  var state = {
+    view: "overview",
+    sector: "assembly",
+    role: localStorage.getItem("gpj-role") || "developer",
+    user: localStorage.getItem("gpj-user") || "Pedro",
+    repairTab: "active",
+    theme: localStorage.getItem("gpj-theme") || "light",
+    lastSerial: Number(localStorage.getItem("gpj-last-serial") || 184),
+    api: JSON.parse(localStorage.getItem("gpj-api") || "{}"),
+    selectedChannel: localStorage.getItem("gpj-selected-channel") || "B1C1",
+    traceQuery: "73471",
+    traceSelected: "GPJX3520",
+    sidebarCollapsed: localStorage.getItem("gpj-sidebar-collapsed") !== "false",
+    notifications: [
+      { level: "critical", module: "Montagem", time: "Agora", title: "O.P. 73471 é prioridade", text: "O gestor marcou esta ordem como prioridade. Três máquinas aguardam início no KVM." },
+      { level: "warning", module: "Reparo", time: "há 8 min", title: "Máquina aguardando peça", text: "GPJX3520 está em espera e já ultrapassou o tempo de atenção configurado." },
+      { level: "info", module: "Vinculação", time: "há 14 min", title: "Conferência de seriais", text: "A O.P. 73664 possui 12 seriais reservados e 12 vinculados. Lote consistente." },
+      { level: "warning", module: "BurnIn", time: "há 37 min", title: "Sincronização pendente", text: "O agente do servidor ainda não confirmou o último ciclo de leitura do controle.csv." }
+    ]
+  };
+
+  var defaultProblems = ["Não liga","Não reconhece HD","Gabinete danificado","Falha de vídeo","Falha de áudio","Falha LAN","Falha de memória","Falha no cooler","Sistema corrompido","SSD com defeito","Superaquecimento","Travando","USB com defeito"];
+  var defaultParts = [
+    { code:"11773", description:"MEMÓRIA DDR3" },
+    { code:"26322", description:"Memória" },
+    { code:"26324", description:"Processador i7 4790" },
+    { code:"32512", description:"Processador i5 660" },
+    { code:"38011", description:"Processador" }
+  ];
+  var defaultRepairs = [
+    { id:1, op:"73471", serial:"GPJX3520", issue:"Não reconhece HD", notes:"Verificar SSD e cabo SATA.", tech:"Pedro", elapsed:"00:41:28", priority:"high", stage:0, status:"active" },
+    { id:2, op:"73462", serial:"GPJX3571", issue:"Gabinete danificado", notes:"Aguardando gabinete compatível.", tech:"Fabio", elapsed:"00:24:47", priority:"normal", stage:1, status:"waiting" },
+    { id:3, op:"73464", serial:"GPJX3519", issue:"Não liga", notes:"", tech:"Washington", elapsed:"00:29:13", priority:"low", stage:3, status:"active" },
+    { id:4, op:"73602", serial:"GPJX3602", issue:"Falha de vídeo", notes:"Entrada registrada pela BIOS.", tech:"Sem técnico", elapsed:"00:00:00", priority:"normal", stage:0, status:"planned" },
+    { id:5, op:"73598", serial:"GPJX3598", issue:"Superaquecimento", notes:"Limpeza concluída, sem troca de peça.", tech:"Pedro", elapsed:"00:36:11", priority:"normal", stage:4, status:"history" }
+  ];
+  function loadLocal(key, fallback) { try { var value = JSON.parse(localStorage.getItem(key)); return Array.isArray(value) ? value : fallback; } catch (error) { return fallback; } }
+  var problems = loadLocal("gpj-problems", defaultProblems);
+  var parts = loadLocal("gpj-parts", defaultParts);
+  var repairRows = loadLocal("gpj-repairs", defaultRepairs);
+  var defaultMachines = [
+    { op:"73471", serial:"GPJX3520", code:"41007", expectedSystem:"Windows 10 Pro", actualSystem:"Windows 11 Pro", stage:"BurnIn", sector:"Montagem", result:"Aprovada", certificate:"Recebido", technician:"Pedro", priority:true, updated:"15:42" },
+    { op:"73471", serial:"GPJX3521", code:"41007", expectedSystem:"Windows 10 Pro", actualSystem:"", stage:"BurnIn", sector:"Montagem", result:"", certificate:"Pendente", technician:"Fransmiler", priority:true, updated:"15:36" },
+    { op:"73471", serial:"GPJX3522", code:"41007", expectedSystem:"Windows 10 Pro", actualSystem:"Windows 10 Pro", stage:"Liberada", sector:"Montagem", result:"Aprovada", certificate:"Recebido", technician:"Washington", priority:true, updated:"15:18" },
+    { op:"73471", serial:"GPJX3523", code:"41007", expectedSystem:"Windows 10 Pro", actualSystem:"", stage:"KVM", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Pedro", priority:true, updated:"15:09" },
+    { op:"73471", serial:"GPJX3524", code:"41007", expectedSystem:"Windows 10 Pro", actualSystem:"", stage:"Reparo", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Fabio", priority:true, updated:"14:54" },
+    { op:"73471", serial:"GPJX3525", code:"41007", expectedSystem:"Windows 10 Pro", actualSystem:"", stage:"Fila KVM", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Sem técnico", priority:true, updated:"14:42" },
+    { op:"73464", serial:"GPJX3519", code:"40822", expectedSystem:"Linux", actualSystem:"Linux", stage:"Liberada", sector:"Montagem", result:"Aprovada", certificate:"Recebido", technician:"Washington", priority:false, updated:"15:31" },
+    { op:"73462", serial:"GPJX3571", code:"40518", expectedSystem:"Windows 10 Pro", actualSystem:"Windows 10 Pro", stage:"BurnIn", sector:"Montagem", result:"Aprovada", certificate:"Recebido", technician:"Fabio", priority:false, updated:"15:18" }
+  ];
+  var machines = loadLocal("gpj-machines", defaultMachines);
+  var defaultKvmSessions = [
+    { key:"B1C1", op:"73471", serial:"GPJX3523", tech:"Pedro", system:"Windows 10 Pro", status:"testing", elapsedSeconds:728, startedAt:Date.now(), failures:0, connection:"HDMI + VGA" },
+    { key:"B2C4", op:"73465", serial:"GPJX3512", tech:"Fransmiler", system:"Linux", status:"paused", elapsedSeconds:521, startedAt:null, failures:1, connection:"HDMI" }
+  ];
+  var kvmSessions = loadLocal("gpj-kvm-sessions", defaultKvmSessions);
+  var kvmPaused = localStorage.getItem("gpj-kvm-global-paused") === "true";
+  function saveOperations() {
+    localStorage.setItem("gpj-problems", JSON.stringify(problems));
+    localStorage.setItem("gpj-parts", JSON.stringify(parts));
+    localStorage.setItem("gpj-repairs", JSON.stringify(repairRows));
+    localStorage.setItem("gpj-machines", JSON.stringify(machines));
+    localStorage.setItem("gpj-kvm-sessions", JSON.stringify(kvmSessions));
+    localStorage.setItem("gpj-kvm-queue", JSON.stringify(kvmQueue));
+  }
+  var channelConfig = JSON.parse(localStorage.getItem("gpj-channels") || "{}");
+  function channelKey(bay, channel) { return "B" + bay + "C" + channel; }
+  function channelType(bay, channel) {
+    var saved = channelConfig[channelKey(bay, channel)];
+    if (saved) return saved;
+    if (bay === 1 && (channel === 12 || channel === 13)) return "Inoperante";
+    return channel <= 3 ? "HDMI + VGA" : channel <= 7 ? "HDMI" : "VGA";
+  }
+  var defaultKvmQueue = [
+    { op:"73471", serial:"GPJX3525", origin:"Reparo", priority:true, attempts:1, system:"Windows 10 Pro" },
+    { op:"73471", serial:"GPJX3526", origin:"BIOS", priority:true, attempts:0, system:"Windows 10 Pro" },
+    { op:"73471", serial:"GPJX3527", origin:"BIOS", priority:true, attempts:0, system:"Windows 10 Pro" },
+    { op:"73471", serial:"GPJX3528", origin:"BIOS", priority:true, attempts:0, system:"Windows 10 Pro" },
+    { op:"73501", serial:"GPJX3601", origin:"BIOS", priority:false, attempts:0, system:"Linux" },
+    { op:"73502", serial:"GPJX3602", origin:"Reparo", priority:false, attempts:1, system:"Windows 11 Home" },
+    { op:"73502", serial:"GPJX3603", origin:"BIOS", priority:false, attempts:0, system:"Windows 11 Home" },
+    { op:"73510", serial:"GPJX3610", origin:"BIOS", priority:false, attempts:0, system:"Windows 10 Home" },
+    { op:"73510", serial:"GPJX3611", origin:"BIOS", priority:false, attempts:0, system:"Windows 10 Home" },
+    { op:"73518", serial:"GPJX3618", origin:"Reparo", priority:false, attempts:1, system:"Windows 11 Pro" },
+    { op:"73518", serial:"GPJX3619", origin:"BIOS", priority:false, attempts:0, system:"Windows 11 Pro" },
+    { op:"73521", serial:"GPJX3621", origin:"BIOS", priority:false, attempts:0, system:"Linux" }
+  ];
+  var kvmQueue = loadLocal("gpj-kvm-queue",defaultKvmQueue);
+  var burninTemperatures = { GPJX3520:"66,9 °C", GPJX3519:"74,7 °C", GPJX3571:"63,2 °C", GPJX3522:"61,8 °C" };
+  var osOptions = ["Linux","Windows 10 Home","Windows 10 Pro","Windows 11 Home","Windows 11 Pro"];
+
+  function machineSystem(serial) {
+    var machine = machines.find(function (item) { return item.serial === serial; });
+    return machine ? machine.expectedSystem : "Não informado";
+  }
+
+  function sessionSystem(session) {
+    return session.system || machineSystem(session.serial);
+  }
+
+  function osClass(system) {
+    return ({ "Linux":"os-linux", "Windows 10 Home":"os-win10-home", "Windows 10 Pro":"os-win10-pro", "Windows 11 Home":"os-win11-home", "Windows 11 Pro":"os-win11-pro" })[system] || "os-unknown";
+  }
+
+  function osShortLabel(system) {
+    return ({ "Linux":"Linux", "Windows 10 Home":"Win 10 Home", "Windows 10 Pro":"Win 10 Pro", "Windows 11 Home":"Win 11 Home", "Windows 11 Pro":"Win 11 Pro" })[system] || "S.O. não informado";
+  }
+
+  function legacyElapsedSeconds(value) {
+    var textValue = String(value || "");
+    var clockMatch = /^(\d+):(\d{2}):(\d{2})$/.exec(textValue);
+    if (clockMatch) return Number(clockMatch[1]) * 3600 + Number(clockMatch[2]) * 60 + Number(clockMatch[3]);
+    var hours = Number((textValue.match(/(\d+)h/) || [0,0])[1]);
+    var minutes = Number((textValue.match(/(\d+)m/) || [0,0])[1]);
+    var seconds = Number((textValue.match(/(\d+)s/) || [0,0])[1]);
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+
+  function normalizeKvmSessions() {
+    kvmSessions.forEach(function (session) {
+      if (!Number.isFinite(session.elapsedSeconds)) session.elapsedSeconds = legacyElapsedSeconds(session.elapsed);
+      if (session.status === "testing" && !session.startedAt) session.startedAt = Date.now();
+      if (session.status === "paused") session.startedAt = null;
+      if (!Number.isFinite(session.failures)) session.failures = 0;
+      if (!session.system || session.system === "Não informado") session.system = machineSystem(session.serial);
+      delete session.elapsed;
+    });
+    localStorage.setItem("gpj-kvm-sessions",JSON.stringify(kvmSessions));
+  }
+
+  function kvmElapsedSeconds(session) {
+    var seconds = Number(session.elapsedSeconds || 0);
+    if (session.status === "testing" && session.startedAt) seconds += Math.max(0,Math.floor((Date.now() - session.startedAt) / 1000));
+    return seconds;
+  }
+
+  function setGlobalKvmPaused(paused) {
+    if (paused === kvmPaused) return;
+    if (paused) {
+      kvmSessions.forEach(function (session) {
+        if (session.status !== "testing") return;
+        session.elapsedSeconds = kvmElapsedSeconds(session);
+        session.startedAt = null;
+        session.status = "paused";
+        session.pausedByGlobal = true;
+      });
+    } else {
+      kvmSessions.forEach(function (session) {
+        if (!session.pausedByGlobal) return;
+        session.status = "testing";
+        session.startedAt = Date.now();
+        session.pausedByGlobal = false;
+      });
+    }
+    kvmPaused = paused;
+    localStorage.setItem("gpj-kvm-global-paused",String(kvmPaused));
+    saveOperations();
+  }
+
+  function normalizeRepairTimers() {
+    repairRows.forEach(function (repair) {
+      if (!Number.isFinite(repair.elapsedSeconds)) repair.elapsedSeconds = legacyElapsedSeconds(repair.elapsed);
+      if (repair.status === "active" && !repair.startedAt) repair.startedAt = Date.now();
+      if (repair.status !== "active") repair.startedAt = null;
+      delete repair.elapsed;
+    });
+    localStorage.setItem("gpj-repairs",JSON.stringify(repairRows));
+  }
+
+  function repairElapsedSeconds(repair) {
+    var seconds = Number(repair.elapsedSeconds || 0);
+    if (repair.status === "active" && repair.startedAt) seconds += Math.max(0,Math.floor((Date.now() - repair.startedAt) / 1000));
+    return seconds;
+  }
+
+  function formatClock(totalSeconds) {
+    var seconds = Math.max(0,Math.floor(totalSeconds || 0));
+    var hours = Math.floor(seconds / 3600);
+    var minutes = Math.floor((seconds % 3600) / 60);
+    var remainder = seconds % 60;
+    return String(hours).padStart(2,"0") + ":" + String(minutes).padStart(2,"0") + ":" + String(remainder).padStart(2,"0");
+  }
+
+  function updateKvmTimers() {
+    $$('[data-kvm-timer]').forEach(function (timer) {
+      var session = kvmSessions.find(function (item) { return item.key === timer.dataset.kvmTimer; });
+      if (session) timer.textContent = formatClock(kvmElapsedSeconds(session));
+    });
+    $$('[data-repair-timer]').forEach(function (timer) {
+      var repair = repairRows.find(function (item) { return String(item.id) === timer.dataset.repairTimer; });
+      if (repair) timer.textContent = formatClock(repairElapsedSeconds(repair));
+    });
+  }
+
+  normalizeKvmSessions();
+  if (kvmPaused) {
+    kvmSessions.forEach(function (session) {
+      if (session.status !== "testing") return;
+      session.elapsedSeconds = kvmElapsedSeconds(session);
+      session.startedAt = null;
+      session.status = "paused";
+      session.pausedByGlobal = true;
+    });
+    localStorage.setItem("gpj-kvm-sessions",JSON.stringify(kvmSessions));
+  }
+  normalizeRepairTimers();
+
+  var $ = function (selector, root) { return (root || document).querySelector(selector); };
+  var $$ = function (selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); };
+  var escapeHtml = function (value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (character) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character];
+    });
+  };
+  var toastTimer;
+
+  function showToast(message) {
+    var toast = $("#toast");
+    toast.textContent = message;
+    toast.classList.add("show");
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(function () { toast.classList.remove("show"); }, 3200);
+  }
+
+  function metric(label, value, helper, trend, tone) {
+    return "<article class=\"metric\"><div class=\"metric-top\"><span>" + label + "</span><b class=\"trend " + (tone || "green") + "\">" + trend + "</b></div><strong>" + value + "</strong><small>" + helper + "</small></article>";
+  }
+
+  function pill(text, tone) {
+    return "<span class=\"pill " + (tone || "green") + "\">" + text + "</span>";
+  }
+
+  function machineValidation(machine) {
+    if (!machine.actualSystem || machine.certificate === "Pendente") return { label:"Certificado pendente", tone:"amber", key:"pending" };
+    if (machine.actualSystem !== machine.expectedSystem) return { label:"Sistema divergente", tone:"red", key:"mismatch" };
+    if (machine.result && machine.result !== "Aprovada") return { label:"Teste reprovado", tone:"red", key:"failed" };
+    return { label:"Sistema validado", tone:"green", key:"validated" };
+  }
+
+  function getNotifications() {
+    var automatic = [];
+    machines.forEach(function (machine) {
+      var validation = machineValidation(machine);
+      if (machine.stage !== "BurnIn" && machine.stage !== "Liberação") return;
+      if (validation.key === "mismatch") automatic.push({ level:"critical", module:"Carcará · BurnIn", time:"Agora", title:machine.serial + " com sistema divergente", text:"Esperado: " + machine.expectedSystem + ". Certificado recebido: " + machine.actualSystem + ". Liberação bloqueada." });
+      if (validation.key === "pending") automatic.push({ level:"warning", module:"Carcará · BurnIn", time:"Agora", title:"Certificado não recebido", text:machine.serial + " da O.P. " + machine.op + " chegou ao BurnIn, mas o certificado ainda não foi sincronizado." });
+    });
+    return automatic.concat(state.notifications);
+  }
+
+  function osSelectOptions(selected) {
+    return osOptions.map(function (system) { return "<option" + (system === selected ? " selected" : "") + ">" + system + "</option>"; }).join("");
+  }
+
+  function pageHead(kicker, title, description, actions) {
+    return "<section class=\"page-head\"><div><span class=\"eyebrow\">" + kicker + "</span><h1>" + title + "</h1><p>" + description + "</p></div><div class=\"head-actions\">" + (actions || "") + "</div></section>";
+  }
+
+  function getNavItems() {
+    var items = [
+      ["overview", "01", "Visão geral"],
+      ["repairs", "02", "Reparos"]
+    ];
+    if (state.sector === "assembly") {
+      items.push(["kvm", "03", "KVM · Run-in"]);
+      items.push(["kvm-config", "CFG", "Config. canais"]);
+      items.push(["linkage", "04", "Vinculação"]);
+      items.push(["burnin", "05", "BurnIn"]);
+    }
+    items.push(["parts", "PÇ", "Peças"]);
+    items.push(["trace", "06", "Rastreabilidade"]);
+    items.push(["indicators", "07", "Indicadores"]);
+    items.push(["registry", "08", "Cadastros"]);
+    if (state.role === "developer") items.push(["integration", "DEV", "Integração API"]);
+    return items;
+  }
+
+  function renderNav() {
+    var nav = $("#main-nav");
+    var items = getNavItems();
+    var signature = items.map(function (item) { return item.join(":"); }).join("|");
+    if (nav.dataset.signature !== signature) {
+      nav.innerHTML = items.map(function (item) { return "<button data-view=\"" + item[0] + "\" title=\"" + escapeHtml(item[2]) + "\" aria-label=\"" + escapeHtml(item[2]) + "\"><i>" + item[1] + "</i>" + item[2] + "</button>"; }).join("");
+      nav.dataset.signature = signature;
+    }
+    if (!items.some(function (item) { return item[0] === state.view; })) state.view = "overview";
+    $$('[data-view]',nav).forEach(function (button) { button.classList.toggle("active",button.dataset.view === state.view); });
+  }
+
+  function updateChrome() {
+    var profile = roleLabels[state.role];
+    $("#app").classList.toggle("sidebar-collapsed",state.sidebarCollapsed);
+    var collapseButton = $("#sidebar-collapse");
+    collapseButton.textContent = state.sidebarCollapsed ? "›" : "‹";
+    collapseButton.setAttribute("aria-label",state.sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral");
+    collapseButton.title = state.sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral";
+    $("#profile-name").textContent = state.user || profile.name;
+    $("#profile-role").textContent = profile.label;
+    $("#profile-initial").textContent = (state.user || profile.name).charAt(0).toUpperCase();
+    $("#sidebar-user").textContent = profile.name + " · " + profile.label;
+    $("#sidebar-sector").textContent = sectorLabels[state.sector];
+    $("#breadcrumb").textContent = "GPJ / " + sectorLabels[state.sector];
+    $("#notification-count").textContent = String(getNotifications().length);
+    $$("[data-sector]").forEach(function (button) { button.classList.toggle("active", button.dataset.sector === state.sector); });
+    document.documentElement.dataset.theme = state.theme;
+    renderNav();
+  }
+
+  function renderOverview() {
+    var sector = sectorLabels[state.sector];
+    var assemblyFlow = "<div class=\"hero-flow\"><article><strong>18</strong><small>BIOS</small></article><article class=\"alert\"><strong>06</strong><small>Reparo</small></article><article><strong>08</strong><small>KVM</small></article><article><strong>04</strong><small>BurnIn</small></article><article><strong>31</strong><small>Liberadas</small></article></div>";
+    var serviceFlow = "<div class=\"hero-flow\"><article><strong>05</strong><small>Fila</small></article><article class=\"alert\"><strong>03</strong><small>Diagnóstico</small></article><article><strong>02</strong><small>Peças</small></article><article><strong>01</strong><small>Testes</small></article><article><strong>09</strong><small>Finalizadas</small></article></div>";
+    var managerExtra = state.role === "technician" ? "" : metric("Capacidade", "92", "máquinas previstas", "85%", "amber");
+    var liveRows = machines.slice(0,5).map(function (machine) {
+      var validation = machineValidation(machine);
+      var status = machine.priority && machine.stage !== "Liberada" ? "Prioridade" : validation.key === "mismatch" ? "Bloqueada" : machine.stage === "Liberada" ? "Liberada" : "Em processo";
+      var tone = status === "Bloqueada" || status === "Prioridade" ? "red" : status === "Liberada" ? "green" : "blue";
+      return "<tr class=\"" + (tone === "red" ? "priority-row" : "") + "\"><td class=\"mono\">" + machine.op + "</td><td><button class=\"table-link\" data-action=\"open-machine-detail\" data-serial=\"" + machine.serial + "\">" + machine.serial + "</button></td><td>" + machine.stage + "</td><td>" + machine.technician + "</td><td>" + machine.updated + "</td><td>" + pill(status,tone) + "</td></tr>";
+    }).join("");
+    var overviewAlerts = getNotifications().slice(0,3).map(function (item) { return "<div class=\"attention-item " + (item.level === "critical" ? "critical" : "") + "\"><i class=\"attention-icon\">" + (item.level === "critical" ? "!" : "⌁") + "</i><span><strong>" + item.title + "</strong><small>" + item.text + "</small></span><b>" + item.time + "</b></div>"; }).join("");
+    return "<div class=\"page-stack\">" +
+      "<section class=\"command-hero\"><div class=\"hero-copy\"><span class=\"eyebrow\">" + sector + " conectada</span><h1>Da entrada à liberação,<br>uma única operação.</h1><p>Filas, prioridades e rastreabilidade compartilhadas sem misturar Montagem, Assistência e RMA.</p><button class=\"button button--primary\" data-view=\"trace\">Rastrear máquina →</button></div>" + (state.sector === "assembly" ? assemblyFlow : serviceFlow) + "</section>" +
+      "<section class=\"metrics\">" +
+        metric("Produção do dia", "67", "Meta operacional", "+12%", "green") +
+        metric("Em processo", "36", "Todas as etapas", "+4", "amber") +
+        metric("Aprovação", "94,2%", "Testes concluídos", "+2,1%", "green") +
+        metric("Atenções", "03", "Ação necessária", "-2", "red") + managerExtra +
+      "</section>" +
+      "<section class=\"panel operation-table-panel\"><div class=\"panel-head\"><div><span>Fluxo ao vivo</span><h2>Máquinas em movimento</h2></div><button class=\"button\" data-view=\"trace\">Ver rastreabilidade</button></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>O.P.</th><th>Serial</th><th>Etapa</th><th>Responsável</th><th>Atualização</th><th>Status</th></tr></thead><tbody>" + liveRows + "</tbody></table></div></section>" +
+      "<section class=\"panel overview-attention-panel\"><div class=\"panel-head\"><div><span>Carcará de Olho</span><h2>Precisa de atenção</h2></div>" + pill(getNotifications().length + " alertas","red") + "</div><div class=\"attention-list attention-list--horizontal\">" + overviewAlerts + "</div></section></div>";
+  }
+
+  function renderRepairs() {
+    var stages = ["Diagnóstico", "Aquisição de peça", "Montagem", "Testes"];
+    var counts = { active:0, planned:0, waiting:0, history:0 };
+    repairRows.forEach(function (row) { counts[row.status] = (counts[row.status] || 0) + 1; });
+    var visibleRows = repairRows.filter(function (row) { return row.status === state.repairTab; });
+    var cards = visibleRows.map(function (row) {
+      var stageHtml = stages.map(function (name, index) {
+        var status = index < row.stage ? "done" : index === row.stage ? "active" : "";
+        return "<div class=\"stage " + status + "\"><strong>" + name + "</strong><small>" + (index < row.stage ? "Concluído" : index === row.stage ? "Em andamento" : "Aguardando") + "</small></div>";
+      }).join("");
+      var priorityLabel = row.priority === "high" ? "Alta" : row.priority === "low" ? "Baixa" : "Normal";
+      var priorityTone = row.priority === "high" ? "red" : row.priority === "low" ? "blue" : "green";
+      var detailAction = "<button class=\"button button--ghost\" data-action=\"repair-details\" data-id=\"" + row.id + "\">Ver detalhes</button>";
+      var actions = detailAction + "<button class=\"button\" data-action=\"edit-repair\" data-id=\"" + row.id + "\">Editar</button>";
+      if (row.status === "active") actions = "<button class=\"button\" data-action=\"pause-repair\" data-id=\"" + row.id + "\">Pausar</button><button class=\"button button--primary\" data-action=\"advance-repair\" data-id=\"" + row.id + "\" data-serial=\"" + row.serial + "\">Concluir etapa</button>" + actions;
+      if (row.status === "planned") actions = "<button class=\"button button--primary\" data-action=\"start-repair\" data-id=\"" + row.id + "\">Iniciar reparo</button>" + actions;
+      if (row.status === "waiting") actions = "<button class=\"button button--primary\" data-action=\"resume-repair\" data-id=\"" + row.id + "\">Retomar</button>" + actions;
+      if (row.status === "history") actions = detailAction + "<button class=\"button\" data-action=\"edit-repair\" data-id=\"" + row.id + "\">Corrigir registro</button>";
+      return "<article class=\"repair-card priority-" + row.priority + "\"><div class=\"repair-top\"><div class=\"repair-identity\"><div class=\"repair-title\"><span>OP " + escapeHtml(row.op) + "</span><strong>" + escapeHtml(row.serial) + "</strong></div><div class=\"repair-meta\"><span class=\"repair-meta-item\"><b>Problema</b>" + escapeHtml(row.issue) + "</span><span class=\"repair-meta-item\"><b>Técnico</b>" + escapeHtml(row.tech) + "</span>" + pill(priorityLabel,priorityTone) + "</div></div><div class=\"repair-clock-block\"><span>Tempo total</span><time class=\"mono live-repair-clock\" data-repair-timer=\"" + row.id + "\">" + formatClock(repairElapsedSeconds(row)) + "</time></div></div>" + (row.notes ? "<p class=\"repair-note\">" + escapeHtml(row.notes) + "</p>" : "") + (row.status === "history" ? "" : "<div class=\"stage-track\">" + stageHtml + "</div>") + "<div class=\"repair-actions\">" + actions + "</div></article>";
+    }).join("");
+    if (!cards) cards = "<section class=\"panel empty-state\"><strong>Nenhum reparo nesta aba.</strong><small>Use “Planejar reparo” para incluir uma máquina.</small></section>";
+    var plannedPreview = repairRows.filter(function (row) { return row.status === "planned" || row.status === "waiting"; }).map(function (row) {
+      return "<button class=\"planning-row priority-" + row.priority + "\" data-action=\"repair-details\" data-id=\"" + row.id + "\"><span><strong>OP " + escapeHtml(row.op) + " · " + escapeHtml(row.serial) + "</strong><small>" + escapeHtml(row.issue) + " · " + escapeHtml(row.tech) + "</small></span>" + pill(row.status === "waiting" ? "Em espera" : "Planejada", row.status === "waiting" ? "amber" : "blue") + "</button>";
+    }).join("") || "<div class=\"empty-inline\">Nenhuma máquina aguardando planejamento.</div>";
+    var stageCounts = [0,0,0,0];
+    repairRows.filter(function (row) { return row.status === "active"; }).forEach(function (row) { stageCounts[Math.min(row.stage,3)] += 1; });
+    var loadRows = stages.map(function (stage, index) {
+      var value = stageCounts[index];
+      var width = Math.min(100, value * 34 + (value ? 18 : 4));
+      return "<div class=\"workload-row\"><span><strong>" + stage + "</strong><small>" + value + " máquina" + (value === 1 ? "" : "s") + "</small></span><i><b style=\"width:" + width + "%\"></b></i></div>";
+    }).join("");
+    return "<div class=\"page-stack\">" + pageHead("Operação técnica", "Reparos · " + sectorLabels[state.sector], "Diagnóstico, peças, montagem, testes e finalização com histórico por tentativa.", "<button class=\"button button--primary\" data-action=\"new-repair\">+ Planejar reparo</button>") +
+      "<section class=\"metrics\">" + metric("Fila atual",String(counts.planned + counts.waiting),"Planejados e em espera","fila","amber") + metric("Ativos",String(counts.active),"Trabalhos em andamento","agora","green") + metric("Em espera",String(counts.waiting),"Atividades pausadas","atenção","amber") + metric("Finalizados",String(counts.history),"Histórico local","total","blue") + "</section>" +
+      "<section class=\"repair-command-grid\"><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Planejamento de reparos</span><h2>Fila que o técnico pode assumir</h2></div><button class=\"button\" data-action=\"new-repair\">+ Nova O.P.</button></div><div class=\"planning-list\">" + plannedPreview + "</div></div><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Carga atual</span><h2>Distribuição por etapa</h2></div></div><div class=\"workload-list\">" + loadRows + "</div></div></section>" +
+      "<div class=\"tabs\"><button data-repair-tab=\"active\" class=\"" + (state.repairTab === "active" ? "active" : "") + "\">Ativos (" + counts.active + ")</button><button data-repair-tab=\"planned\" class=\"" + (state.repairTab === "planned" ? "active" : "") + "\">Planejados (" + counts.planned + ")</button><button data-repair-tab=\"waiting\" class=\"" + (state.repairTab === "waiting" ? "active" : "") + "\">Em espera (" + counts.waiting + ")</button><button data-repair-tab=\"history\" class=\"" + (state.repairTab === "history" ? "active" : "") + "\">Histórico (" + counts.history + ")</button></div><section class=\"repair-cards\">" + cards + "</section></div>";
+  }
+
+  function generateChannels() {
+    var html = "";
+    [14,14,14,7].forEach(function (count, bayIndex) {
+      var channels = "";
+      for (var number = 1; number <= count; number += 1) {
+        var key = channelKey(bayIndex + 1, number);
+        var session = kvmSessions.find(function (item) { return item.key === key; });
+        var className = key === state.selectedChannel ? "selected" : "";
+        var detail = channelType(bayIndex + 1, number);
+        var system = session ? sessionSystem(session) : "";
+        if (session) className += " has-session " + session.status;
+        if (detail === "Inoperante") { className += " offline"; detail = "Bloqueado"; }
+        var channelNumber = "<span class=\"channel-number\">C" + String(number).padStart(2,"0") + "</span>";
+        var channelInfo = session
+          ? channelNumber + "<span class=\"channel-system\">" + escapeHtml(system || "S.O. não informado") + "</span><b class=\"channel-serial\">" + escapeHtml(session.serial) + "</b><span class=\"channel-timer\"><i></i><time data-kvm-timer=\"" + key + "\">" + formatClock(kvmElapsedSeconds(session)) + "</time></span>"
+          : channelNumber + "<span class=\"channel-system\">" + (detail === "Bloqueado" ? "Inoperante" : "Livre") + "</span><b class=\"channel-serial\">" + escapeHtml(detail) + "</b>";
+        channels += "<button class=\"channel " + className + "\" data-action=\"channel\" data-bay=\"" + (bayIndex + 1) + "\" data-channel=\"" + number + "\">" + channelInfo + "</button>";
+      }
+      html += "<section class=\"bay panel\"><div class=\"bay-head\"><strong>Baia " + (bayIndex + 1) + "</strong><small>" + count + " canais</small></div><div class=\"channels\">" + channels + "</div></section>";
+    });
+    return html;
+  }
+
+  function channelDetailModal() {
+    var match = /^B(\d+)C(\d+)$/.exec(state.selectedChannel) || ["",1,1];
+    var bay = Number(match[1]);
+    var channel = Number(match[2]);
+    var session = kvmSessions.find(function (item) { return item.key === state.selectedChannel; });
+    var connection = channelType(bay,channel);
+    var channelLabel = "Baia " + bay + " · Canal " + String(channel).padStart(2,"0");
+    var body = "";
+    if (connection === "Inoperante") {
+      body = "<section class=\"channel-popup-empty\">" + pill("Inoperante","red") + "<strong>Canal bloqueado</strong><p>Altere o tipo de conexão em Configuração de canais para voltar a operar.</p><button type=\"button\" class=\"button\" data-action=\"open-kvm-config\">Configurar canal</button></section>";
+      openModal("Canal selecionado",channelLabel,body);
+      $("#modal").classList.add("modal--wide");
+      return;
+    }
+    if (session) {
+      body = "<section class=\"channel-popup\"><div class=\"channel-popup-summary\"><article class=\"channel-popup-machine\"><span>Número de série</span><strong class=\"mono\">" + escapeHtml(session.serial) + "</strong><small>" + channelLabel + "</small></article><article><span>O.P.</span><strong>" + escapeHtml(session.op) + "</strong></article><article><span>Sistema operacional</span><strong>" + escapeHtml(osShortLabel(sessionSystem(session))) + "</strong></article><article><span>Técnico responsável</span><strong>" + escapeHtml(session.tech) + "</strong></article><article class=\"channel-popup-clock\"><span>Tempo efetivo</span><time data-kvm-timer=\"" + session.key + "\">" + formatClock(kvmElapsedSeconds(session)) + "</time><small>" + (session.status === "paused" ? "Cronômetro pausado" : "Cronômetro em andamento") + "</small></article><article><span>Reinícios / falhas</span><strong>" + Number(session.failures || 0) + "</strong></article><article><span>Conexão da baia</span><strong>" + escapeHtml(session.connection) + "</strong></article><article><span>Estado atual</span>" + pill(session.status === "paused" ? "Pausado" : "Em andamento",session.status === "paused" ? "amber" : "green") + "</article></div><div class=\"channel-popup-note\"><strong>Falha do equipamento</strong><span>Registra a ocorrência, zera o cronômetro e mantém esta mesma máquina no canal para um novo teste.</span></div><div class=\"channel-popup-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle-channel\">" + (session.status === "paused" ? "▶ Retomar canal" : "Ⅱ Pausar canal") + "</button><button type=\"button\" class=\"button button--warning\" data-action=\"fail-channel\">Reiniciar após falha</button><button type=\"button\" class=\"button button--danger\" data-action=\"reject-channel\">Reprovado · enviar ao Reparo</button><button type=\"button\" class=\"button button--primary\" data-action=\"approve-channel\">Aprovado</button></div></section>";
+      openModal("Sessão KVM",channelLabel,body);
+      $("#modal").classList.add("modal--wide");
+      return;
+    }
+    body = "<section class=\"channel-popup-free\"><div class=\"channel-popup-free-head\">" + pill("Livre","green") + "<span>Conexão disponível: <strong>" + escapeHtml(connection) + "</strong></span></div><div class=\"channel-popup-start\"><label class=\"field\">O.P.<input id=\"channel-op\" placeholder=\"Bipe a O.P.\"></label><label class=\"field\">Número de série<input id=\"channel-serial\" placeholder=\"Bipe o serial\"></label><label class=\"field\">Técnico<select id=\"channel-tech\"><option>Pedro</option><option>Fransmiler</option><option>Fabio</option><option>Washington</option></select></label><button type=\"button\" class=\"button button--primary\" data-action=\"start-channel\">Iniciar neste canal</button></div></section>";
+    openModal("Canal livre",channelLabel,body);
+    $("#modal").classList.add("modal--wide");
+  }
+
+  function renderKvm() {
+    function queueItem(row) {
+      var rowSystem = row.system || machineSystem(row.serial);
+      return "<div class=\"queue-item " + (row.priority ? "queue-item--priority" : "queue-item--normal") + "\"><span><strong><i>OP " + escapeHtml(row.op) + "</i><b>" + escapeHtml(row.serial) + "</b></strong><small>" + escapeHtml(row.origin) + " · " + escapeHtml(osShortLabel(rowSystem)) + " · tentativa " + (row.attempts + 1) + "</small></span>" + (row.priority ? pill("Alta","red") : pill("Normal","blue")) + "</div>";
+    }
+    var priorityQueue = kvmQueue.filter(function (row) { return row.priority; });
+    var normalQueue = kvmQueue.filter(function (row) { return !row.priority; });
+    var queue = "<section class=\"queue-group\"><header><strong>Prioridades</strong><span>" + priorityQueue.length + "</span></header>" + (priorityQueue.map(queueItem).join("") || "<small class=\"queue-empty\">Nenhuma prioridade aguardando.</small>") + "</section><section class=\"queue-group\"><header><strong>Fila normal</strong><span>" + normalQueue.length + "</span></header>" + (normalQueue.map(queueItem).join("") || "<small class=\"queue-empty\">Nenhuma máquina na fila normal.</small>") + "</section>";
+    var activeTechnicians = kvmSessions.map(function (session) { return session.tech; }).filter(function (tech,index,list) { return list.indexOf(tech) === index; });
+    var failureCount = kvmSessions.reduce(function (total,session) { return total + Number(session.failures || 0); },0);
+    var globalControl = "<section class=\"kvm-global-control " + (kvmPaused ? "is-paused" : "is-running") + "\"><span><i></i><span><strong>" + (kvmPaused ? "KVM pausado" : "KVM em operação") + "</strong><small>" + (kvmPaused ? "Todos os cronômetros estão congelados." : "Os cronômetros dos canais ativos estão contando.") + "</small></span></span><button class=\"button " + (kvmPaused ? "button--primary" : "button--warning") + "\" data-action=\"toggle-kvm-global\">" + (kvmPaused ? "▶ Retomar KVM" : "Ⅱ Pausar KVM inteiro") + "</button></section>";
+    return "<div class=\"page-stack kvm-page " + (kvmPaused ? "kvm-is-paused" : "") + "\">" + pageHead("KVM · Run-in","Bipagem e canais","Clique em qualquer canal para ver o estado e abrir a sessão. A sequência continua disponível para carrinhos completos.","<button class=\"button\" data-view=\"kvm-config\">⚙ Configurar canais</button><button class=\"button button--primary\" data-action=\"start-scan\">▶ Bipagem sequencial</button>") +
+      "<section class=\"metrics\">" + metric("Canais livres",String(Math.max(0,43 - kvmSessions.length)),"6 inoperantes","agora","green") + metric("Ocupados",String(kvmSessions.length),activeTechnicians.length ? activeTechnicians.join(" · ") : "Nenhum técnico ativo","ao vivo","blue") + metric("Fila planejada",String(kvmQueue.length),kvmQueue.filter(function (row) { return row.priority; }).length + " prioritárias","fila","amber") + metric("Falhas reiniciadas",String(failureCount),"Máquinas continuam no teste","registro",failureCount ? "amber" : "green") + "</section>" +
+      globalControl + "<section class=\"kvm-tools kvm-tools--compact\"><div class=\"panel sequential-panel sequential-panel--open " + (kvmPaused ? "is-paused" : "") + "\"><div class=\"sequential-head\"><span><small>Bipagem sequencial</small><strong id=\"scan-target\">Baia 1 · Canal 01</strong></span>" + pill("Carrinho","green") + "</div><div class=\"scanner-card\"><div class=\"scanner-selectors\"><label class=\"field\">Baia<select id=\"scan-bay\"><option value=\"1\">Baia 1</option><option value=\"2\">Baia 2</option><option value=\"3\">Baia 3</option><option value=\"4\">Baia 4</option></select></label><label class=\"field\">Canal inicial<select id=\"scan-channel\">" + Array.from({length:14},function (_,i) { return "<option value=\"" + (i + 1) + "\">Canal " + String(i + 1).padStart(2,"0") + "</option>"; }).join("") + "</select></label><label class=\"field\">Técnico responsável<select id=\"scan-tech\"><option>Pedro</option><option>Fransmiler</option><option>Fabio</option><option>Washington</option></select></label></div><div class=\"scanner-line\"><label class=\"field\">Ordem de produção<input id=\"scan-op\" placeholder=\"Bipe a O.P.\"></label><label class=\"field\">Número de série<input id=\"scan-serial\" placeholder=\"Bipe o serial\"></label><button class=\"button button--primary scanner-start\" data-action=\"confirm-scan\">Iniciar teste</button></div></div></div><div class=\"panel panel-pad planning-compact\"><div class=\"panel-head compact\"><div><span>Planejamento</span><h2>Próximas máquinas</h2></div><b class=\"queue-total\">" + kvmQueue.length + " na fila</b></div><div class=\"queue-list\">" + queue + "</div></div></section><section class=\"kvm-command-layout\"><div class=\"bays channel-board\">" + generateChannels() + "</div></section></div>";
+  }
+
+  function renderKvmConfig() {
+    var sections = [14,14,14,7].map(function (count, bayIndex) {
+      var cards = "";
+      for (var number = 1; number <= count; number += 1) {
+        var selected = channelType(bayIndex + 1, number);
+        var options = ["HDMI + VGA","HDMI","VGA","Inoperante"].map(function (type) { return "<option" + (type === selected ? " selected" : "") + ">" + type + "</option>"; }).join("");
+        cards += "<label class=\"channel-config-card\"><span>Baia " + (bayIndex + 1) + "</span><strong>Canal " + String(number).padStart(2,"0") + "</strong><select data-channel-config data-bay=\"" + (bayIndex + 1) + "\" data-channel=\"" + number + "\">" + options + "</select></label>";
+      }
+      return "<section class=\"panel panel-pad\"><div class=\"bay-head\"><strong>Baia " + (bayIndex + 1) + "</strong><small>" + count + " canais</small></div><div class=\"channel-config-grid\">" + cards + "</div></section>";
+    }).join("");
+    return "<div class=\"page-stack\">" + pageHead("KVM · Configuração","Configuração de canais","Defina HDMI, VGA, conexão dupla ou canal inoperante. As alterações ficam salvas neste navegador.","<button class=\"button\" data-view=\"kvm\">← Voltar ao KVM</button><button class=\"button button--primary\" data-action=\"save-channels\">Salvar canais</button>") + sections + "</div>";
+  }
+
+  function currentPrefix() {
+    var now = new Date();
+    return String(now.getMonth() + 1).padStart(2,"0") + String(now.getFullYear()).slice(-2);
+  }
+
+  function serialValue(sequence) {
+    return currentPrefix() + String(sequence).padStart(4,"0");
+  }
+
+  function renderLinkage() {
+    return "<div class=\"page-stack\">" + pageHead("Montagem","Vinculação e seriais","Crie lotes seguros por mês e ano. Impressão Zebra ficará preparada como próxima etapa.","<button class=\"button\" data-action=\"serial-history\">Ver histórico</button>") +
+      "<section class=\"serial-layout\"><div class=\"panel panel-pad\"><div class=\"last-serial\"><span>Último serial criado</span><strong>" + serialValue(state.lastSerial) + "</strong><small>Competência " + currentPrefix() + " · sequência protegida contra duplicidade</small></div><form id=\"serial-form\" class=\"serial-form\" style=\"margin-top:16px\"><label class=\"field\">Quantidade<input id=\"serial-quantity\" type=\"number\" min=\"1\" max=\"9999\" value=\"10\"></label><label class=\"field\">O.P.<input id=\"serial-op\" required placeholder=\"Ex.: 73471\"></label><label class=\"field\">Código da máquina<input id=\"serial-code\" required placeholder=\"Código do produto\"></label><label class=\"field\">Sistema operacional esperado<select id=\"serial-os\">" + osSelectOptions("Windows 10 Pro") + "</select></label><label class=\"field\">Layout<select id=\"serial-layout\"><option>Máquina comum</option><option>Backboy</option><option>Etiqueta da caixa</option></select></label><label class=\"field field--wide\">Configuração e componentes<textarea id=\"serial-components\" placeholder=\"Fonte, SSD, placa-mãe, memória...\"></textarea></label><div class=\"validation-note field--wide\"><strong>Validação automática</strong><span>O sistema escolhido ficará preso à O.P., ao código e a cada serial criado. O BurnIn deverá confirmar exatamente o mesmo sistema antes da liberação.</span></div><button class=\"button button--primary field--wide\" type=\"submit\">Criar faixa de números de série</button></form></div><div class=\"panel coming-soon\"><span class=\"eyebrow\">Zebra · Em breve</span><strong>Etiqueta 70 × 30 mm</strong><p>A geração de serial já funciona localmente. A saída ZPL será conectada depois do modelo e resolução da impressora serem confirmados.</p><div class=\"label-preview\"><div><small>OP 73471 · CÓD. 41007</small><br><strong>GPJ OFFICE · SSD 480 GB</strong><div class=\"barcode\"></div><small>" + serialValue(state.lastSerial) + " · OP 73471</small></div><div class=\"fake-qr\" aria-label=\"Exemplo de QR Code\"></div></div></div></section></div>";
+  }
+
+  function renderBurnin() {
+    var burninMachines = machines.filter(function (machine) { return machine.certificate === "Recebido" || machine.stage === "BurnIn"; });
+    var rows = burninMachines.map(function (machine) {
+      var validation = machineValidation(machine);
+      return "<tr class=\"" + (validation.key === "mismatch" ? "validation-error" : "") + "\"><td class=\"mono\">" + machine.updated + "</td><td class=\"mono\">" + machine.op + "</td><td><button class=\"table-link\" data-action=\"open-machine-detail\" data-serial=\"" + machine.serial + "\">" + machine.serial + "</button></td><td>" + pill(machine.result || "Aguardando", machine.result === "Aprovada" ? "green" : machine.result ? "red" : "amber") + "</td><td>" + (burninTemperatures[machine.serial] || "—") + "</td><td>" + machine.expectedSystem + "</td><td>" + (machine.actualSystem || "—") + "</td><td>" + pill(validation.label,validation.tone) + "</td></tr>";
+    }).join("");
+    var validated = burninMachines.filter(function (machine) { return machineValidation(machine).key === "validated"; }).length;
+    var mismatches = burninMachines.filter(function (machine) { return machineValidation(machine).key === "mismatch"; }).length;
+    var pending = burninMachines.filter(function (machine) { return machineValidation(machine).key === "pending"; }).length;
+    return "<div class=\"page-stack\">" + pageHead("Qualidade automatizada","BurnInTest","Resultados do controle.csv com importação idempotente e rastreabilidade por execução.","<button class=\"button\" data-action=\"import-csv\">↑ Importar CSV</button><button class=\"button button--primary\" data-view=\"integration\">Configurar agente</button>") +
+      "<section class=\"metrics\">" + metric("Testados hoje",String(burninMachines.length),validated + " validados","ao vivo","green") + metric("Sistema correto",String(validated),mismatches + " divergência(s)",mismatches ? "bloqueio" : "ok",mismatches ? "red" : "green") + metric("CPU máxima média","66,9 °C","Limite 90 °C","-2,3°","green") + metric("Certificados pendentes",String(pending),"Aguardando agente",pending ? "atenção" : "ok",pending ? "amber" : "green") + "</section><section class=\"certificate-strip\"><div><span>Regra de liberação</span><strong>Esperado na Vinculação = Instalado no certificado</strong></div><p>Se o certificado não chegar ou o sistema for diferente, o Carcará alerta e a máquina não aparece como liberada.</p></section><section class=\"panel\"><div class=\"panel-head\"><div><span>Últimas execuções</span><h2>Banco BurnInTest e certificados</h2></div>" + pill("Conferência automática","green") + "</div><div class=\"table-scroll\"><table class=\"data-table burnin-table\"><thead><tr><th>Hora</th><th>O.P.</th><th>Serial</th><th>Resultado</th><th>CPU máx.</th><th>Sistema esperado</th><th>Sistema instalado</th><th>Certificação</th></tr></thead><tbody>" + rows + "</tbody></table></div></section></div>";
+  }
+
+  function renderTrace() {
+    var query = String(state.traceQuery || "").trim().toLowerCase();
+    var results = machines.filter(function (machine) { return !query || machine.op.toLowerCase() === query || machine.serial.toLowerCase().indexOf(query) >= 0; });
+    var selected = machines.find(function (machine) { return machine.serial === state.traceSelected; });
+    if (!selected || !results.some(function (machine) { return machine.serial === selected.serial; })) selected = results[0] || null;
+    if (selected) state.traceSelected = selected.serial;
+    var resultRows = results.map(function (machine) {
+      var validation = machineValidation(machine);
+      return "<tr class=\"" + (machine.serial === state.traceSelected ? "selected-trace" : "") + "\"><td class=\"mono\">" + machine.op + "</td><td><button class=\"table-link\" data-action=\"select-machine\" data-serial=\"" + machine.serial + "\">" + machine.serial + "</button></td><td>" + machine.stage + "</td><td>" + machine.expectedSystem + "</td><td>" + (machine.actualSystem || "—") + "</td><td>" + pill(validation.label,validation.tone) + "</td><td class=\"mono\">" + machine.updated + "</td></tr>";
+    }).join("");
+    if (!resultRows) resultRows = "<tr><td colspan=\"7\" class=\"empty-table\">Nenhuma máquina encontrada para esta O.P. ou serial.</td></tr>";
+    return "<div class=\"page-stack\">" + pageHead("Histórico completo","Rastreabilidade por máquina e O.P.","Pesquise um serial para ver a linha individual ou uma O.P. para localizar todas as máquinas do lote.","") +
+      "<section class=\"panel panel-pad trace-search-panel\"><div class=\"filter-bar\"><label class=\"field\" style=\"flex:1\">O.P. ou número de série<input id=\"trace-query\" value=\"" + escapeHtml(state.traceQuery) + "\" placeholder=\"Ex.: 73471 ou GPJX3520\"></label><button class=\"button button--primary\" data-action=\"trace-search\">Rastrear</button></div><div class=\"search-hint\"><strong>" + results.length + " máquina(s) encontrada(s)</strong><span>Montagem, Assistência e RMA permanecem identificadas separadamente.</span></div></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Resultado do lote</span><h2>Posição atual e conferência do sistema</h2></div>" + pill(query && results.length > 1 ? "O.P. completa" : "Rastreamento","blue") + "</div><div class=\"table-scroll\"><table class=\"data-table trace-table\"><thead><tr><th>O.P.</th><th>Serial</th><th>Etapa atual</th><th>Sistema esperado</th><th>Sistema instalado</th><th>Certificação</th><th>Atualização</th></tr></thead><tbody>" + resultRows + "</tbody></table></div></section>" +
+      "<section class=\"trace-instruction\"><span><strong>Detalhes sem ocupar a tela</strong><small>Clique em qualquer número de série para abrir identificação, sistemas e linha do tempo completa.</small></span>" + (selected ? "<button class=\"button button--primary\" data-action=\"open-machine-detail\" data-serial=\"" + selected.serial + "\">Ver " + selected.serial + "</button>" : "") + "</section></div>";
+  }
+
+  function renderIndicators() {
+    if (state.role === "technician") {
+      return "<div class=\"page-stack\">" + pageHead("Resumo operacional","Seus indicadores","Informações simples para organizar o trabalho, sem comparação entre funcionários.","") +
+        "<section class=\"metrics\">" + metric("Ativos no seu nome","02","Reparo e KVM","agora","green") + metric("Planejados","04","Próximas atividades","+1","blue") + metric("Em espera","01","Aguardando peça","atenção","amber") + metric("Equipe hoje","67","Resultado geral","85%","green") + "</section><section class=\"panel role-lock\"><h2>Comparativos individuais protegidos</h2><p>Tempos, produtividade por pessoa e análises detalhadas são visíveis somente para o gestor.</p></section></div>";
+    }
+    var privateNote = state.role === "developer" ? "Inclui saúde da API e qualidade das sincronizações." : "Dados individuais restritos à gestão.";
+    return "<div class=\"page-stack\">" + pageHead("Gestão","Indicadores completos",privateNote,"<button class=\"button\">Hoje</button><button class=\"button\">30 dias</button><button class=\"button button--primary\">Personalizado</button>") +
+      "<section class=\"metrics\">" + metric("Eficiência","85%","Capacidade x realizado","+6%","green") + metric("Tempo médio","38m 18s","Todos os módulos","-4m","green") + metric("Reteste KVM","7,4%","Segunda tentativa","-1,2%","amber") + metric("Retrabalho","3,1%","Retorno ao reparo","+0,4%","red") + "</section><section class=\"balanced-grid\"><div class=\"panel\"><div class=\"panel-head\"><div><span>Últimos 14 dias</span><h2>Capacidade e produção real</h2></div></div><div class=\"chart\"><div class=\"bar-chart\">" + [70,85,63,92,78,100,88,72,95,81,90,67,86,93].map(function (value,index) { return "<span style=\"height:" + value + "%\" data-label=\"" + (index + 1) + "/07\"></span>"; }).join("") + "</div></div></div><aside class=\"panel\"><div class=\"panel-head\"><div><span>Qualidade</span><h2>Pontos de atenção</h2></div></div><div class=\"attention-list\"><div class=\"attention-item critical\"><i class=\"attention-icon\">!</i><span><strong>Falhas repetidas no B2-C11</strong><small>4 ocorrências em 7 dias</small></span><b>canal</b></div><div class=\"attention-item\"><i class=\"attention-icon\">↻</i><span><strong>Windows 11 Pro acima da média</strong><small>Tempo médio 1h02</small></span><b>+18m</b></div><div class=\"attention-item\"><i class=\"attention-icon\">#</i><span><strong>O.P. 73471 em prioridade</strong><small>6 de 12 concluídas</small></span><b>50%</b></div></div></aside></section></div>";
+  }
+
+  function renderParts() {
+    var rows = parts.map(function (part, index) {
+      return "<tr><td class=\"mono\"><strong>" + escapeHtml(part.code) + "</strong></td><td>" + escapeHtml(part.description) + "</td><td><button class=\"button\" data-action=\"edit-part\" data-index=\"" + index + "\">Editar</button> <button class=\"button button--danger\" data-action=\"delete-part\" data-index=\"" + index + "\">Excluir</button></td></tr>";
+    }).join("");
+    return "<div class=\"page-stack\">" + pageHead("Cadastro operacional","Peças","Cadastre códigos usados na aquisição do reparo. A lista fica disponível imediatamente no fluxo técnico.","") +
+      "<section class=\"panel panel-pad\"><form id=\"part-form\" class=\"part-form\"><label class=\"field\">Código<input id=\"part-code\" required placeholder=\"Ex.: 41007\"></label><label class=\"field\">Descrição<input id=\"part-description\" required placeholder=\"Ex.: Placa-mãe\"></label><button class=\"button button--primary\" type=\"submit\">+ Cadastrar peça</button></form></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Base de peças</span><h2>" + parts.length + " itens cadastrados</h2></div></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Código</th><th>Descrição</th><th>Ações</th></tr></thead><tbody>" + rows + "</tbody></table></div></section></div>";
+  }
+
+  function renderRegistry() {
+    return "<div class=\"page-stack\">" + pageHead("Cadastros","Base operacional","Técnicos, problemas, peças, canais e parâmetros compartilhados com auditoria.","<button class=\"button button--primary\" data-action=\"new-registry\">+ Novo cadastro</button>") +
+      "<section class=\"metrics\">" + metric("Técnicos","14","9 ativos no turno","ativos","green") + metric("Problemas","23","Categorias cadastradas","+2","blue") + metric("Peças","186","12 em atenção","estoque","amber") + metric("Canais KVM","49","43 operantes","87,8%","green") + "</section><section class=\"panel\"><div class=\"panel-head\"><div><span>Cadastro central</span><h2>Técnicos</h2></div></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Nome</th><th>Matrícula</th><th>Turno</th><th>Situação</th><th>Ações</th></tr></thead><tbody>" + [["Fabio","1","T1"],["Fransmiler","5","T1"],["Pedro","4","T1"],["Washington","3","T1"]].map(function (row) { return "<tr><td><strong>" + row[0] + "</strong></td><td>" + row[1] + "</td><td>" + row[2] + "</td><td>" + pill("Ativo","green") + "</td><td><button class=\"button\" data-action=\"edit-registry\">Editar</button></td></tr>"; }).join("") + "</tbody></table></div></section></div>";
+  }
+
+  function renderIntegration() {
+    if (state.role !== "developer") return "<div class=\"page-stack\"><section class=\"panel role-lock\"><h1>Área restrita</h1><p>Somente o perfil Desenvolvedor pode configurar a API e consultar logs técnicos.</p></section></div>";
+    var endpoint = state.api.url || "https://seu-servidor.example/api/v1/ingestion/burnin/csv";
+    var interval = state.api.interval || "60";
+    return "<div class=\"page-stack\">" + pageHead("DEV · Restrito","Integração BurnIn","Configure o agente Windows, acompanhe lotes e valide a comunicação sem expor a chave no HTML.","<button class=\"button\" data-action=\"download-config\">Baixar configuração exemplo</button>") +
+      "<section class=\"api-grid\"><div class=\"panel panel-pad\"><span class=\"eyebrow\">Configuração do agente</span><div class=\"form-stack\" style=\"margin-top:15px\"><label>URL da API<input id=\"api-url\" value=\"" + escapeHtml(endpoint) + "\"></label><label>Intervalo em minutos<input id=\"api-interval\" type=\"number\" min=\"1\" value=\"" + escapeHtml(interval) + "\"></label><label>Caminho do CSV<input id=\"api-csv\" value=\"" + escapeHtml(state.api.csv || "\\\\SRV-PRODUCAO\\f\\logs-BurnInTest\\CONTROLE\\controle.csv") + "\"></label><label>Identificador da origem<input id=\"api-source\" value=\"" + escapeHtml(state.api.source || "SRV-PRODUCAO") + "\"></label><label>Chave da API<input id=\"api-key\" type=\"password\" placeholder=\"Configurada somente no servidor Windows\"></label><button class=\"button button--primary\" data-action=\"save-api\">Salvar parâmetros locais</button></div></div><div class=\"panel panel-pad\"><span class=\"eyebrow\">Saúde da sincronização</span><div class=\"status-board\" style=\"margin-top:15px\"><div class=\"status-box\"><span>Última leitura</span><strong>15:42</strong></div><div class=\"status-box\"><span>Próxima tentativa</span><strong>16:42</strong></div><div class=\"status-box\"><span>Aceitos</span><strong>21</strong></div><div class=\"status-box\"><span>Duplicados</span><strong>0</strong></div><div class=\"status-box\"><span>Pendentes locais</span><strong>1</strong></div><div class=\"status-box\"><span>Estado</span><strong style=\"color:var(--amber)\">Atenção</strong></div></div><p style=\"color:var(--muted);font-size:10px;line-height:1.6\">A chave digitada não é persistida no navegador. O instalador pede o segredo diretamente no Windows.</p></div></section><section class=\"panel panel-pad\"><span class=\"eyebrow\">Fluxo seguro</span><h2>Original → cópia estável → fila local → API</h2><div class=\"code-block\">1. O agente tenta abrir o controle.csv somente para leitura.<br>2. Cria uma cópia temporária com nome único.<br>3. Compara as linhas com o estado local e monta um lote apenas com novidades.<br>4. Envia com chave de idempotência e token externo.<br>5. Exclui somente a cópia confirmada; nunca o controle.csv.<br>6. Em caso de falha, mantém o lote na fila para nova tentativa.</div></section><section class=\"panel panel-pad\"><span class=\"eyebrow\">Auditoria</span><div class=\"audit-list\" style=\"margin-top:12px\"><div class=\"audit-item\"><strong>15:42:18</strong><span>Lote processado · 21 aceitos</span><small>SRV-PRODUCAO</small></div><div class=\"audit-item\"><strong>14:42:05</strong><span>Leitura sem novos registros</span><small>SRV-PRODUCAO</small></div><div class=\"audit-item\"><strong>13:42:09</strong><span>Falha de rede · mantido na fila</span><small>nova tentativa</small></div></div></section></div>";
+  }
+
+  function render() {
+    updateChrome();
+    var renderers = { overview: renderOverview, repairs: renderRepairs, kvm: renderKvm, "kvm-config": renderKvmConfig, parts: renderParts, linkage: renderLinkage, burnin: renderBurnin, trace: renderTrace, indicators: renderIndicators, registry: renderRegistry, integration: renderIntegration };
+    var pageNames = { overview:"Visão geral",repairs:"Reparos",kvm:"KVM · Run-in","kvm-config":"Configuração de canais",parts:"Peças",linkage:"Vinculação",burnin:"BurnIn",trace:"Rastreabilidade",indicators:"Indicadores",registry:"Cadastros",integration:"Integração API" };
+    $("#page-title").textContent = pageNames[state.view] || "GPJ Flow";
+    $("#content").innerHTML = (renderers[state.view] || renderOverview)();
+    updateKvmTimers();
+  }
+
+  function setView(view) {
+    if (view === "more") { openDrawer("quick-drawer"); return; }
+    if (view === "integration" && state.role !== "developer") {
+      showToast("A configuração da API é exclusiva do perfil DEV.");
+      return;
+    }
+    if (state.view === view) return;
+    state.view = view;
+    $("#sidebar").classList.remove("open");
+    $("#sidebar-scrim").classList.remove("show");
+    render();
+  }
+
+  function renderNotifications() {
+    $("#notification-list").innerHTML = getNotifications().map(function (item) {
+      return "<article class=\"notification " + item.level + "\"><span><b>" + item.module + "</b><time>" + item.time + "</time></span><strong>" + item.title + "</strong><p>" + item.text + "</p><button class=\"button\" data-close-drawer>Abrir registro</button></article>";
+    }).join("");
+  }
+
+  function renderQuickActions() {
+    var actions = [
+      ["new-repair","Planejar reparo","O.P., serial, problema e prioridade"],
+      ["start-scan","Iniciar teste KVM","Bipagem sequencial por canal"],
+      ["new-registry","Cadastrar peça","Código e descrição sem sair do fluxo"]
+    ];
+    if (state.sector === "assembly") actions.push(["new-serial","Criar números de série","Lote da Vinculação"]);
+    if (state.role === "developer") actions.push(["open-integration","Configurar API","Agente Windows e sincronização"]);
+    $("#quick-actions").innerHTML = actions.map(function (item) {
+      return "<button data-action=\"" + item[0] + "\"><strong>" + item[1] + "</strong><small>" + item[2] + "</small></button>";
+    }).join("");
+  }
+
+  function openDrawer(id) {
+    if (id === "notification-drawer") renderNotifications();
+    if (id === "quick-drawer") renderQuickActions();
+    $("#" + id).setAttribute("aria-hidden","false");
+  }
+
+  function closeDrawers() {
+    $$(".drawer").forEach(function (drawer) { drawer.setAttribute("aria-hidden","true"); });
+  }
+
+  function openModal(kicker, title, body) {
+    $("#modal").classList.remove("modal--wide");
+    $("#modal-kicker").textContent = kicker;
+    $("#modal-title").textContent = title;
+    $("#modal-body").innerHTML = body;
+    if (!$("#modal").open) $("#modal").showModal();
+  }
+
+  function machineDetailModal(serial) {
+    var machine = machines.find(function (item) { return item.serial === serial; });
+    if (!machine) { showToast("A máquina selecionada não foi encontrada."); return; }
+    var validation = machineValidation(machine);
+    var repair = repairRows.find(function (item) { return item.serial === serial && item.status !== "history"; });
+    var session = kvmSessions.find(function (item) { return item.serial === serial; });
+    var priorityLabel = machine.priorityLevel === "low" ? "Baixa" : machine.priority ? "Alta" : "Normal";
+    var priorityTone = machine.priorityLevel === "low" ? "blue" : machine.priority ? "red" : "green";
+    var burninTitle = validation.key === "mismatch" ? "Sistema divergente: liberação bloqueada" : validation.key === "pending" ? "BurnIn aguardando certificado" : "BurnIn validou o sistema correto";
+    var burninDetail = validation.key === "mismatch" ? "Esperado " + machine.expectedSystem + " · recebido " + machine.actualSystem : validation.key === "pending" ? "O agente ainda não enviou o certificado" : (machine.actualSystem || machine.expectedSystem) + " confirmado pelo certificado";
+    var body = "<section class=\"record-popup\"><div class=\"record-popup-summary\"><article class=\"record-primary\"><span>Número de série</span><strong class=\"mono\">" + escapeHtml(machine.serial) + "</strong><small>O.P. " + escapeHtml(machine.op) + " · " + escapeHtml(machine.sector) + "</small></article><article><span>Etapa atual</span><strong>" + escapeHtml(machine.stage) + "</strong><small>Atualizado às " + escapeHtml(machine.updated) + "</small></article><article><span>Responsável</span><strong>" + escapeHtml(machine.technician) + "</strong><small>" + (session ? escapeHtml(session.key) + " em operação" : repair ? "Fluxo do reparo" : "Registro da linha") + "</small></article><article><span>Prioridade</span>" + pill(priorityLabel,priorityTone) + "<small>Código " + escapeHtml(machine.code) + "</small></article><article><span>Certificado</span><strong>" + escapeHtml(machine.certificate) + "</strong><small>" + escapeHtml(validation.label) + "</small></article></div><div class=\"record-popup-grid\"><div class=\"record-timeline\"><div class=\"record-section-head\"><span>Linha do tempo</span><strong>Histórico operacional</strong></div><div class=\"attention-list\"><div class=\"attention-item\"><i class=\"attention-icon\">✓</i><span><strong>Vinculação criada</strong><small>Sistema esperado " + escapeHtml(machine.expectedSystem) + "</small></span><b>08:12</b></div><div class=\"attention-item\"><i class=\"attention-icon\">✓</i><span><strong>BIOS conferida</strong><small>Encaminhamento registrado no fluxo</small></span><b>08:44</b></div><div class=\"attention-item\"><i class=\"attention-icon\">✓</i><span><strong>KVM / Run-in</strong><small>Operação vinculada a " + escapeHtml(machine.technician) + "</small></span><b>10:06</b></div><div class=\"attention-item " + (validation.tone === "red" ? "critical" : "") + "\"><i class=\"attention-icon\">" + (validation.key === "validated" ? "✓" : "!") + "</i><span><strong>" + burninTitle + "</strong><small>" + burninDetail + "</small></span><b>" + escapeHtml(machine.updated) + "</b></div></div></div><div class=\"record-validation\"><div class=\"record-section-head\"><span>Conferência final</span><strong>Sistema operacional</strong></div><div class=\"os-check-card " + validation.key + "\"><span>Sistema esperado</span><strong>" + escapeHtml(machine.expectedSystem) + "</strong><i>↓ conferência BurnIn</i><span>Sistema instalado</span><strong>" + escapeHtml(machine.actualSystem || "Ainda não informado") + "</strong></div>" + (repair ? "<div class=\"record-note\"><span>Reparo vinculado</span><strong>" + escapeHtml(repair.issue) + "</strong><small>" + escapeHtml(repair.notes || "Sem observações adicionais") + "</small></div>" : "") + "</div></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Fechar</button><button class=\"button button--primary\" type=\"button\" data-action=\"go-machine-trace\" data-serial=\"" + escapeHtml(machine.serial) + "\">Abrir na rastreabilidade</button></div></section>";
+    openModal("Registro completo","Máquina " + machine.serial,body);
+    $("#modal").classList.add("modal--wide");
+  }
+
+  function repairDetailModal(id) {
+    var row = repairRows.find(function (item) { return item.id === Number(id); });
+    if (!row) { showToast("O reparo selecionado não foi encontrado."); return; }
+    var stages = ["Diagnóstico","Aquisição de peça","Montagem","Testes"];
+    var statusLabels = {active:"Em andamento",planned:"Planejado",waiting:"Em espera",history:"Finalizado"};
+    var priorityLabel = row.priority === "high" ? "Alta" : row.priority === "low" ? "Baixa" : "Normal";
+    var priorityTone = row.priority === "high" ? "red" : row.priority === "low" ? "blue" : "green";
+    var stageHtml = stages.map(function (name,index) { var status = index < row.stage ? "done" : index === row.stage && row.status !== "history" ? "active" : ""; return "<div class=\"stage " + status + "\"><strong>" + name + "</strong><small>" + (index < row.stage || row.status === "history" ? "Concluído" : index === row.stage ? "Em andamento" : "Aguardando") + "</small></div>"; }).join("");
+    var body = "<section class=\"record-popup repair-record-popup\"><div class=\"record-popup-summary\"><article class=\"record-primary\"><span>Número de série</span><strong class=\"mono\">" + escapeHtml(row.serial) + "</strong><small>O.P. " + escapeHtml(row.op) + "</small></article><article><span>Problema</span><strong>" + escapeHtml(row.issue) + "</strong><small>Categoria cadastrada</small></article><article><span>Técnico</span><strong>" + escapeHtml(row.tech) + "</strong><small>Responsável planejado</small></article><article><span>Prioridade</span>" + pill(priorityLabel,priorityTone) + "<small>Planejamento do reparo</small></article><article><span>Tempo total</span><time class=\"record-clock mono\" data-repair-timer=\"" + row.id + "\">" + formatClock(repairElapsedSeconds(row)) + "</time><small>" + statusLabels[row.status] + "</small></article></div><div class=\"record-repair-flow\"><div class=\"record-section-head\"><span>Fluxo técnico</span><strong>Etapas desta máquina</strong></div><div class=\"stage-track\">" + stageHtml + "</div></div><div class=\"record-note\"><span>Observações</span><strong>" + escapeHtml(row.notes || "Nenhuma observação registrada") + "</strong>" + (row.partCode ? "<small>Peça vinculada: " + escapeHtml(row.partCode) + "</small>" : "") + "</div><div class=\"modal-actions modal-actions--split\"><button class=\"button button--danger\" type=\"button\" data-action=\"delete-repair\" data-id=\"" + row.id + "\">Excluir registro</button><span></span><button class=\"button\" value=\"cancel\">Fechar</button><button class=\"button button--primary\" type=\"button\" data-action=\"edit-repair\" data-id=\"" + row.id + "\">Editar registro</button></div></section>";
+    openModal("Reparo · " + statusLabels[row.status],"OP " + row.op + " · " + row.serial,body);
+    $("#modal").classList.add("modal--wide");
+  }
+
+  function repairModal(row) {
+    row = row || { op:"", serial:"", issue:problems[0] || "", tech:"Sem técnico", priority:"normal", notes:"" };
+    var problemOptions = problems.map(function (problem) { return "<option" + (problem === row.issue ? " selected" : "") + ">" + escapeHtml(problem) + "</option>"; }).join("");
+    var techOptions = ["Sem técnico","Pedro","Fabio","Washington"].map(function (tech) { return "<option" + (tech === row.tech ? " selected" : "") + ">" + tech + "</option>"; }).join("");
+    openModal("Planejamento", row.id ? "Editar reparo" : "Novo reparo", "<div class=\"repair-form-grid\"><label class=\"field\">O.P.<input id=\"new-op\" value=\"" + escapeHtml(row.op) + "\" placeholder=\"Número da O.P.\"></label><label class=\"field\">Número de série<input id=\"new-serial\" value=\"" + escapeHtml(row.serial) + "\" placeholder=\"Número de série\"></label><label class=\"field problem-field\">Problema cadastrado<select id=\"new-problem\">" + problemOptions + "</select><button class=\"inline-link\" type=\"button\" data-action=\"add-problem\">+ Cadastrar outro problema</button></label><label class=\"field\">Técnico planejado<select id=\"new-tech\">" + techOptions + "</select></label><label class=\"field\">Prioridade<select id=\"new-priority\"><option value=\"normal\"" + (row.priority === "normal" ? " selected" : "") + ">Normal</option><option value=\"high\"" + (row.priority === "high" ? " selected" : "") + ">Alta</option><option value=\"low\"" + (row.priority === "low" ? " selected" : "") + ">Baixa</option></select></label><label class=\"field notes-field\">Observações<textarea id=\"new-notes\" placeholder=\"Detalhes úteis para o diagnóstico\">" + escapeHtml(row.notes || "") + "</textarea></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-repair\" data-id=\"" + (row.id || "") + "\">" + (row.id ? "Salvar alterações" : "Adicionar à fila") + "</button></div>");
+  }
+
+  function newRepairModal() { repairModal(null); }
+
+  function addProblemModal() {
+    openModal("Cadastro rápido","Novo problema","<div class=\"form-stack\"><label>Nome do problema<input id=\"problem-name\" placeholder=\"Ex.: BIOS não salva\"></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-problem\">Cadastrar problema</button></div>");
+  }
+
+  function partModal(index) {
+    var part = index == null ? {code:"",description:""} : parts[index];
+    openModal("Cadastro de peças", index == null ? "Nova peça" : "Editar peça", "<div class=\"form-stack\"><label>Código<input id=\"modal-part-code\" value=\"" + escapeHtml(part.code) + "\"></label><label>Descrição<input id=\"modal-part-description\" value=\"" + escapeHtml(part.description) + "\"></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-part-modal\" data-index=\"" + (index == null ? "" : index) + "\">Salvar peça</button></div>");
+  }
+
+  function profileModal() {
+    openModal("Perfil local","Visualizar como","<p class=\"modal-copy\">A versão local abre direto no sistema. Use estes perfis apenas para conferir as permissões e telas.</p><div class=\"quick-grid\" style=\"padding:0\"><button data-action=\"switch-role\" data-role=\"technician\"><strong>Técnico</strong><small>Operação e indicadores resumidos</small></button><button data-action=\"switch-role\" data-role=\"manager\"><strong>Gestor</strong><small>Indicadores e gestão completa</small></button><button data-action=\"switch-role\" data-role=\"developer\"><strong>DEV</strong><small>API, canais e todas as telas</small></button></div>");
+  }
+
+  function channelModal(bay, channel) {
+    openModal("KVM · Run-in", "Baia " + bay + " · Canal " + String(channel).padStart(2,"0"), "<div class=\"form-stack\"><label>Ordem de produção<input id=\"channel-op\" placeholder=\"Bipe a O.P.\"></label><label>Número de série<input id=\"channel-serial\" placeholder=\"Bipe o serial\"></label><label>Técnico<select><option>Pedro</option><option>Fabio</option><option>Washington</option></select></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"start-channel\">Iniciar teste</button></div>");
+  }
+
+  function finishRepairModal(serial) {
+    openModal("Conclusão de etapa", serial || "Reparo", "<p style=\"color:var(--muted);font-size:11px\">O diagnóstico precisa de troca de peça?</p><div class=\"quick-grid\" style=\"padding:0\"><button data-action=\"needs-part\"><strong>Sim, adquirir peça</strong><small>Abre um novo ciclo de aquisição, montagem e testes.</small></button><button data-action=\"no-part\"><strong>Não, finalizar</strong><small>Registra a solução e segue direto à finalização.</small></button></div>");
+  }
+
+  function acquisitionModal() {
+    var options = parts.map(function (part) { return "<option value=\"" + escapeHtml(part.code) + "\">" + escapeHtml(part.code + " — " + part.description) + "</option>"; }).join("");
+    openModal("Aquisição de peça","Selecionar peça","<div class=\"form-stack\"><label>Peça cadastrada<select id=\"repair-part\">" + options + "</select></label><label>Observação<textarea id=\"repair-part-notes\" placeholder=\"Motivo da troca ou detalhe da aquisição\"></textarea></label><button class=\"inline-link\" type=\"button\" data-action=\"open-parts\">+ A peça não existe? Cadastrar agora</button></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"confirm-part\">Iniciar aquisição</button></div>");
+  }
+
+  function kvmRejectionModal(session) {
+    var machine = machines.find(function (item) { return item.serial === session.serial; });
+    var priority = machine && machine.priorityLevel ? machine.priorityLevel : machine && machine.priority ? "high" : "normal";
+    var problemOptions = problems.map(function (problem) { return "<option>" + escapeHtml(problem) + "</option>"; }).join("");
+    var techOptions = ["Sem técnico","Pedro","Fabio","Washington","Fransmiler"].map(function (tech) { return "<option" + (tech === "Sem técnico" ? " selected" : "") + ">" + tech + "</option>"; }).join("");
+    openModal("KVM → Planejamento do Reparo","Máquina reprovada","<p class=\"modal-copy\">A O.P. e o serial vieram da sessão do KVM. Complete o problema para enviar a máquina diretamente à fila planejada do Reparo.</p><div class=\"repair-form-grid\"><label class=\"field\">O.P.<input id=\"reject-op\" value=\"" + escapeHtml(session.op) + "\" readonly></label><label class=\"field\">Número de série<input id=\"reject-serial\" value=\"" + escapeHtml(session.serial) + "\" readonly></label><label class=\"field problem-field\">Problema encontrado<select id=\"reject-problem\">" + problemOptions + "</select></label><label class=\"field\">Técnico planejado<select id=\"reject-tech\">" + techOptions + "</select></label><label class=\"field\">Prioridade<select id=\"reject-priority\"><option value=\"normal\"" + (priority === "normal" ? " selected" : "") + ">Normal</option><option value=\"high\"" + (priority === "high" ? " selected" : "") + ">Alta</option><option value=\"low\"" + (priority === "low" ? " selected" : "") + ">Baixa</option></select></label><label class=\"field notes-field\">Observações<textarea id=\"reject-notes\" placeholder=\"Descreva o que ocorreu no KVM\">Reprovada durante o teste KVM no canal " + escapeHtml(session.key) + ".</textarea></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--danger\" type=\"button\" data-action=\"confirm-kvm-rejection\" data-key=\"" + escapeHtml(session.key) + "\">Enviar para o Reparo</button></div>");
+  }
+
+  function handleAction(action, element) {
+    if (action === "new-repair") newRepairModal();
+    if (action === "repair-details") repairDetailModal(element.dataset.id);
+    if (action === "delete-repair") { var deleteId = Number(element.dataset.id); var deleteRow = repairRows.find(function (row) { return row.id === deleteId; }); if (deleteRow && window.confirm("Excluir o registro da OP " + deleteRow.op + "?")) { repairRows = repairRows.filter(function (row) { return row.id !== deleteId; }); saveOperations(); if ($("#modal").open) $("#modal").close(); render(); showToast("Registro do reparo excluído."); } }
+    if (action === "open-machine-detail") machineDetailModal(element.dataset.serial);
+    if (action === "go-machine-trace") { state.traceSelected = element.dataset.serial; state.traceQuery = element.dataset.serial; if ($("#modal").open) $("#modal").close(); setView("trace"); }
+    if (action === "switch-role") { state.role = element.dataset.role; state.user = state.role === "developer" ? "Pedro" : roleLabels[state.role].name; localStorage.setItem("gpj-role",state.role); localStorage.setItem("gpj-user",state.user); $("#modal").close(); state.view = "overview"; render(); showToast("Perfil alterado para " + roleLabels[state.role].name + "."); }
+    if (action === "save-repair") {
+      var editId = Number(element.dataset.id || 0);
+      var existing = repairRows.find(function (row) { return row.id === editId; });
+      var data = { id: editId || Date.now(), op:$("#new-op").value.trim(), serial:$("#new-serial").value.trim(), issue:$("#new-problem").value, tech:$("#new-tech").value, priority:$("#new-priority").value, notes:$("#new-notes").value.trim(), elapsedSeconds:existing ? repairElapsedSeconds(existing) : 0, startedAt:existing && existing.status === "active" ? Date.now() : null, stage: existing ? existing.stage : 0, status: existing ? existing.status : "planned" };
+      if (!data.op || !data.serial) { showToast("Informe a O.P. e o número de série."); return; }
+      if (existing) repairRows[repairRows.indexOf(existing)] = data; else repairRows.unshift(data);
+      saveOperations(); $("#modal").close(); state.repairTab = data.status; render(); showToast(existing ? "Reparo atualizado." : "Reparo adicionado aos planejados.");
+    }
+    if (action === "edit-repair") { var editRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (editRow) repairModal(editRow); }
+    if (action === "start-repair" || action === "resume-repair") { var startRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (startRow) { startRow.status = "active"; startRow.startedAt = Date.now(); saveOperations(); state.repairTab = "active"; render(); showToast("Reparo em andamento no nome de " + startRow.tech + "."); } }
+    if (action === "advance-repair") {
+      state.currentRepairId = Number(element.dataset.id);
+      var advancing = repairRows.find(function (row) { return row.id === state.currentRepairId; });
+      if (advancing && advancing.stage === 0) finishRepairModal(element.dataset.serial);
+      else if (advancing && advancing.stage < 3) { advancing.stage += 1; saveOperations(); render(); showToast("Etapa concluída. Próxima etapa iniciada."); }
+      else if (advancing) openModal("Resultado do teste",advancing.serial,"<div class=\"quick-grid\" style=\"padding:0\"><button data-action=\"test-approved\"><strong>Aprovado</strong><small>Finaliza o reparo.</small></button><button data-action=\"test-rejected\"><strong>Reprovado</strong><small>Abre novo ciclo de aquisição.</small></button></div>");
+    }
+    if (action === "needs-part") acquisitionModal();
+    if (action === "confirm-part") { var partRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (partRow) { partRow.stage = 1; partRow.partCode = $("#repair-part").value; partRow.notes = [partRow.notes,$("#repair-part-notes").value.trim()].filter(Boolean).join(" · "); saveOperations(); } $("#modal").close(); render(); showToast("Aquisição iniciada com a peça selecionada."); }
+    if (action === "open-parts") { $("#modal").close(); setView("parts"); }
+    if (action === "no-part") { var doneRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (doneRow) { doneRow.elapsedSeconds = repairElapsedSeconds(doneRow); doneRow.startedAt = null; doneRow.status = "history"; doneRow.stage = 4; saveOperations(); } $("#modal").close(); state.repairTab = "history"; render(); showToast("Solução registrada e reparo finalizado."); }
+    if (action === "test-approved") { var approvedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (approvedRow) { approvedRow.elapsedSeconds = repairElapsedSeconds(approvedRow); approvedRow.startedAt = null; approvedRow.status = "history"; approvedRow.stage = 4; saveOperations(); } $("#modal").close(); state.repairTab = "history"; render(); showToast("Teste aprovado e reparo finalizado."); }
+    if (action === "test-rejected") { var rejectedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (rejectedRow) { rejectedRow.stage = 1; rejectedRow.notes = [rejectedRow.notes,"Teste reprovado: novo ciclo de peça"].filter(Boolean).join(" · "); saveOperations(); } acquisitionModal(); }
+    if (action === "pause-repair") { var pauseRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (pauseRow) { pauseRow.elapsedSeconds = repairElapsedSeconds(pauseRow); pauseRow.startedAt = null; pauseRow.status = "waiting"; saveOperations(); state.repairTab = "waiting"; render(); showToast("Atividade movida para Em espera. O cronômetro foi congelado."); } }
+    if (action === "add-problem") addProblemModal();
+    if (action === "save-problem") { var problemName = $("#problem-name").value.trim(); if (!problemName) { showToast("Informe o nome do problema."); return; } if (problems.indexOf(problemName) < 0) problems.push(problemName); saveOperations(); $("#modal").close(); showToast("Problema cadastrado e disponível na lista."); }
+    if (action === "edit-registry") showToast("Edição aberta com auditoria de alterações.");
+    if (action === "open-kvm-config") { if ($("#modal").open) $("#modal").close(); setView("kvm-config"); }
+    if (action === "channel") { state.selectedChannel = channelKey(element.dataset.bay,element.dataset.channel); localStorage.setItem("gpj-selected-channel",state.selectedChannel); render(); channelDetailModal(); }
+    if (action === "toggle-kvm-global") { setGlobalKvmPaused(!kvmPaused); render(); showToast(kvmPaused ? "KVM inteiro pausado. Todos os cronômetros foram congelados." : "KVM retomado. Os cronômetros ativos voltaram a contar."); }
+    if (action === "start-channel") {
+      if (kvmPaused) { showToast("Retome o KVM inteiro antes de iniciar uma máquina."); return; }
+      var startOp = $("#channel-op") ? $("#channel-op").value.trim() : "";
+      var startSerial = $("#channel-serial") ? $("#channel-serial").value.trim() : "";
+      var startTech = $("#channel-tech") ? $("#channel-tech").value : "Pedro";
+      if (!startOp || !startSerial) { showToast("Bipe a O.P. e o número de série."); return; }
+      var channelMatch = /^B(\d+)C(\d+)$/.exec(state.selectedChannel);
+      var plannedStart = kvmQueue.find(function (row) { return row.serial === startSerial; });
+      kvmSessions = kvmSessions.filter(function (item) { return item.key !== state.selectedChannel; });
+      kvmSessions.push({ key:state.selectedChannel, op:startOp, serial:startSerial, tech:startTech, system:plannedStart && plannedStart.system ? plannedStart.system : machineSystem(startSerial), status:"testing", elapsedSeconds:0, startedAt:Date.now(), failures:0, connection:channelType(Number(channelMatch[1]),Number(channelMatch[2])) });
+      var startedMachine = machines.find(function (machine) { return machine.serial === startSerial; });
+      if (startedMachine) { startedMachine.stage = "KVM"; startedMachine.technician = startTech; startedMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); }
+      kvmQueue = kvmQueue.filter(function (row) { return row.serial !== startSerial; }); saveOperations(); render(); channelDetailModal(); showToast("Teste KVM iniciado no canal escolhido.");
+    }
+    if (action === "toggle-channel") { if (kvmPaused) { showToast("O KVM inteiro está pausado. Retome a estação para alterar este canal."); return; } var toggleSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (toggleSession) { if (toggleSession.status === "paused") { toggleSession.status = "testing"; toggleSession.startedAt = Date.now(); } else { toggleSession.elapsedSeconds = kvmElapsedSeconds(toggleSession); toggleSession.startedAt = null; toggleSession.status = "paused"; } saveOperations(); render(); channelDetailModal(); showToast(toggleSession.status === "paused" ? "Teste pausado. O cronômetro foi congelado." : "Teste retomado. O cronômetro voltou a contar."); } }
+    if (action === "fail-channel") { if (kvmPaused) { showToast("Retome o KVM antes de reiniciar o teste."); return; } var failedSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (failedSession) { failedSession.failures += 1; failedSession.elapsedSeconds = 0; failedSession.startedAt = Date.now(); failedSession.status = "testing"; failedSession.lastFailureAt = new Date().toISOString(); var failedMachine = machines.find(function (machine) { return machine.serial === failedSession.serial; }); if (failedMachine) { failedMachine.stage = "KVM"; failedMachine.technician = failedSession.tech; failedMachine.kvmFailures = Number(failedMachine.kvmFailures || 0) + 1; failedMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } saveOperations(); render(); channelDetailModal(); showToast("Falha registrada. A contagem foi zerada para testar a mesma máquina novamente."); } }
+    if (action === "reject-channel") { var rejectedSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (rejectedSession) kvmRejectionModal(rejectedSession); }
+    if (action === "confirm-kvm-rejection") { var rejectedKey = element.dataset.key; var rejectionSession = kvmSessions.find(function (item) { return item.key === rejectedKey; }); if (!rejectionSession) { showToast("A sessão do KVM não foi encontrada."); return; } var rejectionData = { id:Date.now(), op:$("#reject-op").value.trim(), serial:$("#reject-serial").value.trim(), issue:$("#reject-problem").value, tech:$("#reject-tech").value, priority:$("#reject-priority").value, notes:$("#reject-notes").value.trim(), elapsedSeconds:0, startedAt:null, stage:0, status:"planned" }; repairRows.unshift(rejectionData); var rejectionMachine = machines.find(function (machine) { return machine.serial === rejectionData.serial; }); if (rejectionMachine) { rejectionMachine.stage = "Reparo"; rejectionMachine.technician = rejectionData.tech; rejectionMachine.priority = rejectionData.priority === "high"; rejectionMachine.priorityLevel = rejectionData.priority; rejectionMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } kvmSessions = kvmSessions.filter(function (item) { return item.key !== rejectedKey; }); saveOperations(); $("#modal").close(); render(); showToast("Máquina reprovada e enviada aos Planejados do Reparo."); }
+    if (action === "approve-channel") { var approvedSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (approvedSession) { var approvedMachine = machines.find(function (machine) { return machine.serial === approvedSession.serial; }); if (approvedMachine) { approvedMachine.stage = "BurnIn"; approvedMachine.certificate = "Pendente"; approvedMachine.actualSystem = ""; approvedMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } kvmSessions = kvmSessions.filter(function (item) { return item.key !== state.selectedChannel; }); saveOperations(); if ($("#modal").open) $("#modal").close(); render(); showToast("KVM aprovado. Aguardando certificado BurnIn."); } }
+    if (action === "confirm-scan") { if (kvmPaused) { showToast("Retome o KVM inteiro antes de iniciar a bipagem."); return; } var bay = Number($("#scan-bay").value), channel = Number($("#scan-channel").value), selectedBay = bay, selectedChannel = channel, op = $("#scan-op").value.trim(), serial = $("#scan-serial").value.trim(), tech = $("#scan-tech").value; if (!op || !serial) { showToast("Bipe a O.P. e o número de série."); return; } var key = channelKey(bay,channel); if (channelType(bay,channel) === "Inoperante" || kvmSessions.some(function (item) { return item.key === key; })) { showToast("O canal escolhido não está livre."); return; } var plannedScan = kvmQueue.find(function (row) { return row.serial === serial; }); kvmSessions.push({key:key,op:op,serial:serial,tech:tech,system:plannedScan && plannedScan.system ? plannedScan.system : machineSystem(serial),status:"testing",elapsedSeconds:0,startedAt:Date.now(),failures:0,connection:channelType(bay,channel)}); var scannedMachine = machines.find(function (machine) { return machine.serial === serial; }); if (scannedMachine) { scannedMachine.stage = "KVM"; scannedMachine.technician = tech; } kvmQueue = kvmQueue.filter(function (row) { return row.serial !== serial; }); saveOperations(); var next = channel + 1; if (next > (bay === 4 ? 7 : 14)) { bay += 1; next = 1; } if (bay > 4) { bay = 1; next = 1; } state.selectedChannel = key; localStorage.setItem("gpj-selected-channel",state.selectedChannel); render(); window.setTimeout(function () { var baySelect = $("#scan-bay"), channelSelect = $("#scan-channel"); if (baySelect) baySelect.value = String(bay); if (channelSelect) channelSelect.value = String(next); var target = $("#scan-target"); if (target) target.textContent = "Baia " + bay + " · Canal " + String(next).padStart(2,"0"); },0); showToast("Teste iniciado na Baia " + selectedBay + " · Canal " + String(selectedChannel).padStart(2,"0") + "."); }
+    if (action === "start-scan") { setView("kvm"); window.setTimeout(function () { var input = $("#scan-op"); if (input) input.focus(); }, 50); }
+    if (action === "save-channels") { $$('[data-channel-config]').forEach(function (select) { channelConfig[channelKey(select.dataset.bay,select.dataset.channel)] = select.value; }); localStorage.setItem("gpj-channels",JSON.stringify(channelConfig)); showToast("Configuração dos canais salva."); }
+    if (action === "new-serial") { closeDrawers(); setView("linkage"); }
+    if (action === "serial-history") showToast("Histórico de lotes preparado para integração com o banco.");
+    if (action === "new-registry") { closeDrawers(); setView("parts"); }
+    if (action === "edit-part") partModal(Number(element.dataset.index));
+    if (action === "delete-part") { parts.splice(Number(element.dataset.index),1); saveOperations(); render(); showToast("Peça excluída."); }
+    if (action === "save-part-modal") { var partIndex = element.dataset.index === "" ? null : Number(element.dataset.index); var partData = {code:$("#modal-part-code").value.trim(),description:$("#modal-part-description").value.trim()}; if (!partData.code || !partData.description) { showToast("Informe código e descrição."); return; } if (partIndex == null) parts.unshift(partData); else parts[partIndex] = partData; saveOperations(); $("#modal").close(); render(); showToast("Peça salva."); }
+    if (action === "import-csv") showToast("Seleção de CSV disponível na integração final.");
+    if (action === "trace-search") { state.traceQuery = $("#trace-query").value.trim(); var foundMachine = machines.find(function (machine) { return machine.serial.toLowerCase().indexOf(state.traceQuery.toLowerCase()) >= 0 || machine.op === state.traceQuery; }); if (foundMachine) state.traceSelected = foundMachine.serial; render(); showToast(foundMachine ? "Rastreabilidade atualizada." : "Nenhuma máquina encontrada."); }
+    if (action === "select-machine") { state.traceSelected = element.dataset.serial; machineDetailModal(element.dataset.serial); }
+    if (action === "open-integration") { closeDrawers(); setView("integration"); }
+    if (action === "save-api") {
+      state.api = { url: $("#api-url").value.trim(), interval: $("#api-interval").value, csv: $("#api-csv").value.trim(), source: $("#api-source").value.trim() };
+      localStorage.setItem("gpj-api",JSON.stringify(state.api));
+      $("#api-key").value = "";
+      showToast("Parâmetros locais salvos. A chave não foi armazenada.");
+    }
+    if (action === "download-config") showToast("O arquivo config.example.json está incluído na pasta do agente.");
+  }
+
+  $("#sidebar-collapse").addEventListener("click", function () { state.sidebarCollapsed = !state.sidebarCollapsed; localStorage.setItem("gpj-sidebar-collapsed",String(state.sidebarCollapsed)); updateChrome(); });
+  $("#menu-toggle").addEventListener("click", function () { $("#sidebar").classList.toggle("open"); $("#sidebar-scrim").classList.toggle("show"); });
+  $("#sidebar-scrim").addEventListener("click", function () { $("#sidebar").classList.remove("open"); $("#sidebar-scrim").classList.remove("show"); });
+  $("#notification-button").addEventListener("click", function () { openDrawer("notification-drawer"); });
+  $("#mobile-add").addEventListener("click", function () { openDrawer("quick-drawer"); });
+  $("#profile-button").addEventListener("click", profileModal);
+  $("#theme-button").addEventListener("click", function () {
+    var themes = ["light","dark","black"];
+    state.theme = themes[(themes.indexOf(state.theme) + 1) % themes.length];
+    localStorage.setItem("gpj-theme",state.theme);
+    document.documentElement.dataset.theme = state.theme;
+    showToast("Tema alterado para " + ({light:"Claro",dark:"Escuro",black:"Black / Andon"})[state.theme] + ".");
+  });
+  $("#fullscreen-button").addEventListener("click", function () {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(function () { showToast("O navegador bloqueou a tela cheia."); });
+    else document.exitFullscreen();
+  });
+  document.addEventListener("click", function (event) {
+    var viewButton = event.target.closest("[data-view],[data-mobile-view]");
+    if (viewButton) setView(viewButton.dataset.view || viewButton.dataset.mobileView);
+    var sectorButton = event.target.closest("[data-sector]");
+    if (sectorButton) { state.sector = sectorButton.dataset.sector; state.view = "overview"; render(); }
+    var repairTab = event.target.closest("[data-repair-tab]");
+    if (repairTab) { state.repairTab = repairTab.dataset.repairTab; render(); }
+    var closeButton = event.target.closest("[data-close-drawer]");
+    if (closeButton) closeDrawers();
+    var actionButton = event.target.closest("[data-action]");
+    if (actionButton) handleAction(actionButton.dataset.action, actionButton);
+  });
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape") closeDrawers(); });
+  document.addEventListener("change", function (event) {
+    if (event.target.id !== "scan-bay" && event.target.id !== "scan-channel") return;
+    var target = $("#scan-target");
+    if (target) target.textContent = "Baia " + $("#scan-bay").value + " · Canal " + String($("#scan-channel").value).padStart(2,"0");
+  });
+  document.addEventListener("submit", function (event) {
+    if (event.target.id === "part-form") {
+      event.preventDefault();
+      var partData = {code:$("#part-code").value.trim(),description:$("#part-description").value.trim()};
+      if (!partData.code || !partData.description) { showToast("Informe código e descrição."); return; }
+      parts.unshift(partData); saveOperations(); render(); showToast("Peça cadastrada e disponível no reparo."); return;
+    }
+    if (event.target.id !== "serial-form") return;
+    event.preventDefault();
+    var quantity = Math.max(1,Math.min(9999,Number($("#serial-quantity").value) || 1));
+    var first = state.lastSerial + 1;
+    var serialOp = $("#serial-op").value.trim();
+    var serialCode = $("#serial-code").value.trim();
+    var serialSystem = $("#serial-os").value;
+    for (var offset = 0; offset < quantity; offset += 1) {
+      machines.push({ op:serialOp, serial:serialValue(first + offset), code:serialCode, expectedSystem:serialSystem, actualSystem:"", stage:"Vinculação", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Sem técnico", priority:false, updated:new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) });
+    }
+    state.lastSerial += quantity;
+    localStorage.setItem("gpj-last-serial",String(state.lastSerial));
+    saveOperations();
+    showToast("Faixa " + serialValue(first) + " a " + serialValue(state.lastSerial) + " reservada com sucesso.");
+    render();
+  });
+  document.documentElement.dataset.theme = state.theme;
+  render();
+  window.setInterval(updateKvmTimers,1000);
+})();
