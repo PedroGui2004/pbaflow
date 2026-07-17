@@ -77,14 +77,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "GPJ Flow — Operação Integrada" },
+      { name: "description", content: "Centro de operação GPJ: Montagem, Assistência, RMA, KVM, BurnIn e rastreabilidade em uma interface integrada." },
+      { name: "author", content: "GPJ Flow" },
+      { name: "theme-color", content: "#173a5e" },
+      { property: "og:title", content: "GPJ Flow — Operação Integrada" },
+      { property: "og:description", content: "Centro de operação GPJ: Montagem, Assistência, RMA, KVM, BurnIn e rastreabilidade em uma interface integrada." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
