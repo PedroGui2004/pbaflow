@@ -29,6 +29,20 @@
   };
 
   var defaultProblems = ["Não liga","Não reconhece HD","Gabinete danificado","Falha de vídeo","Falha de áudio","Falha LAN","Falha de memória","Falha no cooler","Sistema corrompido","SSD com defeito","Superaquecimento","Travando","USB com defeito"];
+  var defaultSolutions = [
+    "Limpeza interna e reaplicação de pasta térmica",
+    "Reencaixe de memórias RAM",
+    "Reencaixe de cabos SATA / alimentação",
+    "Atualização/Reset da BIOS",
+    "Reinstalação do sistema operacional",
+    "Atualização de drivers",
+    "Reaperto do dissipador / cooler",
+    "Reencaixe da placa de vídeo",
+    "Reset da CMOS",
+    "Ajuste de configuração no setup",
+    "Reencaixe do painel frontal",
+    "Sem defeito constatado"
+  ];
   var defaultParts = [
     { code:"11773", description:"MEMÓRIA DDR3" },
     { code:"26322", description:"Memória" },
@@ -45,6 +59,7 @@
   ];
   function loadLocal(key, fallback) { try { var value = JSON.parse(localStorage.getItem(key)); return Array.isArray(value) ? value : fallback; } catch (error) { return fallback; } }
   var problems = loadLocal("gpj-problems", defaultProblems);
+  var solutions = loadLocal("gpj-solutions", defaultSolutions);
   var parts = loadLocal("gpj-parts", defaultParts);
   var repairRows = loadLocal("gpj-repairs", defaultRepairs);
   var defaultMachines = [
@@ -66,6 +81,7 @@
   var kvmPaused = localStorage.getItem("gpj-kvm-global-paused") === "true";
   function saveOperations() {
     localStorage.setItem("gpj-problems", JSON.stringify(problems));
+    localStorage.setItem("gpj-solutions", JSON.stringify(solutions));
     localStorage.setItem("gpj-parts", JSON.stringify(parts));
     localStorage.setItem("gpj-repairs", JSON.stringify(repairRows));
     localStorage.setItem("gpj-machines", JSON.stringify(machines));
@@ -646,6 +662,37 @@
     openModal("Conclusão de etapa", serial || "Reparo", "<p style=\"color:var(--muted);font-size:11px\">O diagnóstico precisa de troca de peça?</p><div class=\"quick-grid\" style=\"padding:0\"><button data-action=\"needs-part\"><strong>Sim, adquirir peça</strong><small>Abre um novo ciclo de aquisição, montagem e testes.</small></button><button data-action=\"no-part\"><strong>Não, finalizar</strong><small>Registra a solução e segue direto à finalização.</small></button></div>");
   }
 
+  function solutionModal() {
+    var options = solutions.map(function (solution) {
+      return "<option>" + escapeHtml(solution) + "</option>";
+    }).join("");
+    openModal(
+      "Finalização sem troca de peça",
+      "Selecionar solução aplicada",
+      "<p class=\"modal-copy\">Escolha a solução que resolveu o problema. Ela ficará registrada no histórico do reparo.</p>" +
+      "<div class=\"form-stack\">" +
+        "<label class=\"field problem-field\">Solução aplicada" +
+          "<select id=\"repair-solution\">" + options + "</select>" +
+          "<button class=\"inline-link\" type=\"button\" data-action=\"add-solution\">+ Cadastrar outra solução</button>" +
+        "</label>" +
+        "<label class=\"field\">Observação (opcional)<textarea id=\"repair-solution-notes\" placeholder=\"Detalhes úteis do procedimento\"></textarea></label>" +
+      "</div>" +
+      "<div class=\"modal-actions\">" +
+        "<button class=\"button\" value=\"cancel\">Cancelar</button>" +
+        "<button class=\"button button--primary\" type=\"button\" data-action=\"confirm-solution\">Finalizar reparo</button>" +
+      "</div>"
+    );
+  }
+
+  function addSolutionModal() {
+    openModal(
+      "Cadastro rápido",
+      "Nova solução",
+      "<div class=\"form-stack\"><label>Nome da solução<input id=\"solution-name\" placeholder=\"Ex.: Reencaixe do conector 24 pinos\"></label></div>" +
+      "<div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-solution\">Cadastrar solução</button></div>"
+    );
+  }
+
   function acquisitionModal() {
     var options = parts.map(function (part) { return "<option value=\"" + escapeHtml(part.code) + "\">" + escapeHtml(part.code + " — " + part.description) + "</option>"; }).join("");
     openModal("Aquisição de peça","Selecionar peça","<div class=\"form-stack\"><label>Peça cadastrada<select id=\"repair-part\">" + options + "</select></label><label>Observação<textarea id=\"repair-part-notes\" placeholder=\"Motivo da troca ou detalhe da aquisição\"></textarea></label><button class=\"inline-link\" type=\"button\" data-action=\"open-parts\">+ A peça não existe? Cadastrar agora</button></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"confirm-part\">Iniciar aquisição</button></div>");
@@ -686,7 +733,28 @@
     if (action === "needs-part") acquisitionModal();
     if (action === "confirm-part") { var partRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (partRow) { partRow.stage = 1; partRow.partCode = $("#repair-part").value; partRow.notes = [partRow.notes,$("#repair-part-notes").value.trim()].filter(Boolean).join(" · "); saveOperations(); } $("#modal").close(); render(); showToast("Aquisição iniciada com a peça selecionada."); }
     if (action === "open-parts") { $("#modal").close(); setView("parts"); }
-    if (action === "no-part") { var doneRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (doneRow) { doneRow.elapsedSeconds = repairElapsedSeconds(doneRow); doneRow.startedAt = null; doneRow.status = "history"; doneRow.stage = 4; saveOperations(); } $("#modal").close(); state.repairTab = "history"; render(); showToast("Solução registrada e reparo finalizado."); }
+    if (action === "no-part") { solutionModal(); }
+    if (action === "add-solution") addSolutionModal();
+    if (action === "save-solution") { var solutionName = $("#solution-name").value.trim(); if (!solutionName) { showToast("Informe o nome da solução."); return; } if (solutions.indexOf(solutionName) < 0) solutions.push(solutionName); saveOperations(); $("#modal").close(); solutionModal(); var sel = $("#repair-solution"); if (sel) sel.value = solutionName; showToast("Solução cadastrada e disponível na lista."); }
+    if (action === "confirm-solution") {
+      var solutionValue = $("#repair-solution") ? $("#repair-solution").value : "";
+      var solutionNotes = $("#repair-solution-notes") ? $("#repair-solution-notes").value.trim() : "";
+      var doneRow = repairRows.find(function (row) { return row.id === state.currentRepairId; });
+      if (!solutionValue) { showToast("Selecione uma solução."); return; }
+      if (doneRow) {
+        doneRow.elapsedSeconds = repairElapsedSeconds(doneRow);
+        doneRow.startedAt = null;
+        doneRow.status = "history";
+        doneRow.stage = 4;
+        doneRow.solution = solutionValue;
+        doneRow.notes = [doneRow.notes, "Solução: " + solutionValue, solutionNotes].filter(Boolean).join(" · ");
+        saveOperations();
+      }
+      $("#modal").close();
+      state.repairTab = "history";
+      render();
+      showToast("Solução registrada e reparo finalizado.");
+    }
     if (action === "test-approved") { var approvedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (approvedRow) { approvedRow.elapsedSeconds = repairElapsedSeconds(approvedRow); approvedRow.startedAt = null; approvedRow.status = "history"; approvedRow.stage = 4; saveOperations(); } $("#modal").close(); state.repairTab = "history"; render(); showToast("Teste aprovado e reparo finalizado."); }
     if (action === "test-rejected") { var rejectedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (rejectedRow) { rejectedRow.stage = 1; rejectedRow.notes = [rejectedRow.notes,"Teste reprovado: novo ciclo de peça"].filter(Boolean).join(" · "); saveOperations(); } acquisitionModal(); }
     if (action === "pause-repair") { var pauseRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (pauseRow) { pauseRow.elapsedSeconds = repairElapsedSeconds(pauseRow); pauseRow.startedAt = null; pauseRow.status = "waiting"; saveOperations(); state.repairTab = "waiting"; render(); showToast("Atividade movida para Em espera. O cronômetro foi congelado."); } }
