@@ -94,12 +94,28 @@ function GpjApp() {
   useEffect(() => {
     if (loaded.current) return;
     loaded.current = true;
-    const script = document.createElement("script");
-    script.src = "/gpj/app.js";
-    script.defer = true;
-    document.body.appendChild(script);
+    const runtimeWindow = window as Window & {
+      __GPJ_CONFIG__?: { supabaseUrl: string; supabaseKey: string };
+    };
+    runtimeWindow.__GPJ_CONFIG__ = {
+      supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? "",
+      supabaseKey:
+        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+        import.meta.env.VITE_SUPABASE_ANON_KEY ??
+        "",
+    };
+
+    const backendScript = document.createElement("script");
+    backendScript.src = "/gpj/backend.js";
+    backendScript.defer = true;
+    const appScript = document.createElement("script");
+    appScript.src = "/gpj/app.js";
+    appScript.defer = true;
+    backendScript.addEventListener("load", () => document.body.appendChild(appScript));
+    document.body.appendChild(backendScript);
     return () => {
-      script.remove();
+      backendScript.remove();
+      appScript.remove();
     };
   }, []);
 

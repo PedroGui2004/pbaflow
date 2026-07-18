@@ -6,6 +6,15 @@
     manager: { name: "Gestor", label: "Administração" },
     developer: { name: "Desenvolvedor", label: "DEV · Integração" }
   };
+  var backend = window.gpjBackend || null;
+  var backendState = {
+    configured: Boolean(backend && backend.configured),
+    remoteReady: false,
+    status: backend && backend.configured ? "connecting" : "local",
+    profile: null,
+    realtimeStop: null,
+    reloadTimer: null
+  };
   var sectorLabels = { assembly: "Montagem", assistance: "Assistência", rma: "RMA" };
   var state = {
     view: "overview",
@@ -88,6 +97,7 @@
     localStorage.setItem("gpj-kvm-sessions", JSON.stringify(kvmSessions));
     localStorage.setItem("gpj-kvm-queue", JSON.stringify(kvmQueue));
     localStorage.setItem("gpj-serial-batches", JSON.stringify(serialBatches));
+    if (backendState.remoteReady && backend) backend.syncSnapshot(currentSnapshot());
   }
   var channelConfig = JSON.parse(localStorage.getItem("gpj-channels") || "{}");
   function channelKey(bay, channel) { return "B" + bay + "C" + channel; }
@@ -115,6 +125,86 @@
   var serialBatches = loadLocal("gpj-serial-batches", []);
   var burninTemperatures = { GPJX3520:"66,9 °C", GPJX3519:"74,7 °C", GPJX3571:"63,2 °C", GPJX3522:"61,8 °C" };
   var osOptions = ["Linux","Windows 10 Home","Windows 10 Pro","Windows 11 Home","Windows 11 Pro"];
+
+  function currentSnapshot() {
+    return {
+      machines: machines,
+      repairs: repairRows,
+      kvmSessions: kvmSessions,
+      kvmQueue: kvmQueue,
+      serialBatches: serialBatches,
+      problems: problems,
+      solutions: solutions,
+      parts: parts,
+      channelConfig: channelConfig,
+      notifications: state.notifications
+    };
+  }
+
+  function applyRemoteSnapshot(snapshot) {
+    machines = snapshot.machines || [];
+    repairRows = snapshot.repairs || [];
+    kvmSessions = snapshot.kvmSessions || [];
+    kvmQueue = snapshot.kvmQueue || [];
+    serialBatches = snapshot.serialBatches || [];
+    problems = snapshot.problems && snapshot.problems.length ? snapshot.problems : defaultProblems.slice();
+    solutions = snapshot.solutions && snapshot.solutions.length ? snapshot.solutions : defaultSolutions.slice();
+    parts = snapshot.parts && snapshot.parts.length ? snapshot.parts : defaultParts.slice();
+    channelConfig = snapshot.channelConfig || {};
+    state.notifications = snapshot.notifications || [];
+    backendState.profile = snapshot.profile || null;
+    if (backendState.profile) {
+      state.role = backendState.profile.role || "technician";
+      state.user = backendState.profile.display_name || backendState.profile.email || roleLabels[state.role].name;
+    }
+    var serialNumbers = machines.map(function (machine) {
+      var match = /(\d+)$/.exec(machine.serial || "");
+      return match ? Number(match[1]) : 0;
+    });
+    state.lastSerial = Math.max.apply(Math, [0].concat(serialNumbers));
+    backendState.remoteReady = true;
+    backendState.status = "online";
+    normalizeKvmSessions();
+    normalizeRepairTimers();
+    saveOperations();
+    render();
+  }
+
+  async function reloadRemoteSnapshot(silent) {
+    if (!backend || !backend.getSession()) return;
+    try {
+      var snapshot = await backend.fetchSnapshot();
+      applyRemoteSnapshot(snapshot);
+      if (!silent) showToast("Operacao sincronizada com o servidor.");
+    } catch (error) {
+      backendState.status = error && error.status === 401 ? "signed-out" : "error";
+      updateChrome();
+      if (!silent) showToast(error.message || "Nao foi possivel sincronizar os dados.");
+    }
+  }
+
+  function startRealtime() {
+    if (!backend || !backend.getSession()) return;
+    if (backendState.realtimeStop) backendState.realtimeStop();
+    backendState.realtimeStop = backend.subscribe(function () {
+      window.clearTimeout(backendState.reloadTimer);
+      backendState.reloadTimer = window.setTimeout(function () { reloadRemoteSnapshot(true); }, 450);
+    });
+  }
+
+  async function initializeBackend() {
+    if (!backendState.configured) return;
+    if (!backend.getSession()) {
+      backendState.status = "signed-out";
+      updateChrome();
+      window.setTimeout(profileModal, 80);
+      return;
+    }
+    backendState.status = "connecting";
+    updateChrome();
+    await reloadRemoteSnapshot(true);
+    if (backendState.remoteReady) startRealtime();
+  }
 
   function machineSystem(serial) {
     var machine = machines.find(function (item) { return item.serial === serial; });
@@ -315,7 +405,7 @@
   }
 
   function updateChrome() {
-    var profile = roleLabels[state.role];
+    var profile = roleLabels[state.role] || roleLabels.technician;
     $("#app").classList.toggle("sidebar-collapsed",state.sidebarCollapsed);
     var collapseButton = $("#sidebar-collapse");
     collapseButton.textContent = state.sidebarCollapsed ? "›" : "‹";
@@ -328,6 +418,18 @@
     $("#sidebar-sector").textContent = sectorLabels[state.sector];
     $("#breadcrumb").textContent = "PBA / " + sectorLabels[state.sector];
     $("#notification-count").textContent = String(getNotifications().length);
+    var onlineIndicator = $(".plant-online");
+    if (onlineIndicator) {
+      var syncLabels = {
+        online: "Base compartilhada online",
+        connecting: "Conectando a base",
+        "signed-out": "Login necessario",
+        error: "Sincronizacao pendente",
+        local: "Base ainda nao configurada"
+      };
+      onlineIndicator.dataset.status = backendState.status;
+      onlineIndicator.innerHTML = "<i></i> " + syncLabels[backendState.status];
+    }
     $$("[data-sector]").forEach(function (button) { button.classList.toggle("active", button.dataset.sector === state.sector); });
     document.documentElement.dataset.theme = state.theme;
     renderNav();
@@ -830,6 +932,17 @@
   }
 
   function profileModal() {
+    if (backendState.configured && !backend.getSession()) {
+      openModal("Acesso seguro","Entrar no PBA Flow","<p class=\"modal-copy\">Use o e-mail e a senha cadastrados pelo administrador. O perfil e as permissoes serao carregados automaticamente.</p><div class=\"form-stack\"><label>E-mail<input id=\"auth-email\" type=\"email\" autocomplete=\"username\" placeholder=\"nome@empresa.com.br\"></label><label>Senha<input id=\"auth-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Sua senha\"></label></div><div class=\"modal-actions\"><button class=\"button button--primary\" type=\"button\" data-action=\"sign-in\">Entrar</button></div>");
+      window.setTimeout(function () { var input = $("#auth-email"); if (input) input.focus(); }, 0);
+      return;
+    }
+    if (backendState.configured) {
+      var activeProfile = backendState.profile || backend.getProfile() || {};
+      var activeRole = roleLabels[activeProfile.role] || roleLabels.technician;
+      openModal("Sessao autenticada",activeProfile.display_name || state.user,"<div class=\"profile-session\"><span class=\"profile-session-avatar\">" + escapeHtml((activeProfile.display_name || state.user || "U").charAt(0).toUpperCase()) + "</span><div><strong>" + escapeHtml(activeProfile.email || "Usuario autenticado") + "</strong><small>" + escapeHtml(activeRole.name + " · " + activeRole.label) + "</small></div></div><p class=\"modal-copy\">Alteracoes sao identificadas por usuario e registradas na auditoria da operacao.</p><div class=\"modal-actions\"><button class=\"button button--danger\" type=\"button\" data-action=\"sign-out\">Sair desta conta</button><button class=\"button\" value=\"cancel\">Fechar</button></div>");
+      return;
+    }
     openModal("Perfil local","Visualizar como","<p class=\"modal-copy\">A versão local abre direto no sistema. Use estes perfis apenas para conferir as permissões e telas.</p><div class=\"quick-grid\" style=\"padding:0\"><button data-action=\"switch-role\" data-role=\"technician\"><strong>Técnico</strong><small>Operação e indicadores resumidos</small></button><button data-action=\"switch-role\" data-role=\"manager\"><strong>Gestor</strong><small>Indicadores e gestão completa</small></button><button data-action=\"switch-role\" data-role=\"developer\"><strong>DEV</strong><small>API, canais e todas as telas</small></button></div>");
   }
 
@@ -886,9 +999,49 @@
   }
 
   function handleAction(action, element) {
+    if (action === "sign-in") {
+      var authEmail = $("#auth-email").value.trim();
+      var authPassword = $("#auth-password").value;
+      if (!authEmail || !authPassword) { showToast("Informe o e-mail e a senha."); return; }
+      element.disabled = true;
+      element.textContent = "Entrando...";
+      backend.signIn(authEmail, authPassword).then(async function (result) {
+        backendState.profile = result.profile;
+        backendState.status = "connecting";
+        $("#modal").close();
+        await reloadRemoteSnapshot(true);
+        startRealtime();
+        showToast("Acesso liberado. Base compartilhada online.");
+      }).catch(function (error) {
+        element.disabled = false;
+        element.textContent = "Entrar";
+        showToast(error.message || "E-mail ou senha invalidos.");
+      });
+      return;
+    }
+    if (action === "sign-out") {
+      backend.signOut().then(function () {
+        backendState.remoteReady = false;
+        backendState.profile = null;
+        backendState.status = "signed-out";
+        machines = [];
+        repairRows = [];
+        kvmSessions = [];
+        kvmQueue = [];
+        serialBatches = [];
+        $("#modal").close();
+        render();
+        profileModal();
+      });
+      return;
+    }
+    if (action === "switch-role" && backendState.configured) {
+      showToast("O perfil e definido pelo administrador.");
+      return;
+    }
     if (action === "new-repair") newRepairModal();
     if (action === "repair-details") repairDetailModal(element.dataset.id);
-    if (action === "delete-repair") { var deleteId = Number(element.dataset.id); var deleteRow = repairRows.find(function (row) { return row.id === deleteId; }); if (deleteRow && window.confirm("Excluir o registro da OP " + deleteRow.op + "?")) { repairRows = repairRows.filter(function (row) { return row.id !== deleteId; }); saveOperations(); if ($("#modal").open) $("#modal").close(); render(); showToast("Registro do reparo excluído."); } }
+    if (action === "delete-repair") { var deleteId = Number(element.dataset.id); var deleteRow = repairRows.find(function (row) { return row.id === deleteId; }); if (deleteRow && window.confirm("Excluir o registro da OP " + deleteRow.op + "?")) { repairRows = repairRows.filter(function (row) { return row.id !== deleteId; }); if (backendState.remoteReady) backend.remove("repair",deleteId).catch(function (error) { showToast(error.message || "Exclusao pendente no servidor."); }); saveOperations(); if ($("#modal").open) $("#modal").close(); render(); showToast("Registro do reparo excluído."); } }
     if (action === "open-machine-detail") machineDetailModal(element.dataset.serial);
     if (action === "go-machine-trace") { state.traceSelected = element.dataset.serial; state.traceQuery = element.dataset.serial; if ($("#modal").open) $("#modal").close(); setView("trace"); }
     if (action === "switch-role") { state.role = element.dataset.role; state.user = state.role === "developer" ? "Pedro" : roleLabels[state.role].name; localStorage.setItem("gpj-role",state.role); localStorage.setItem("gpj-user",state.user); $("#modal").close(); state.view = "overview"; render(); showToast("Perfil alterado para " + roleLabels[state.role].name + "."); }
@@ -955,16 +1108,17 @@
       kvmSessions.push({ key:state.selectedChannel, op:startOp, serial:startSerial, tech:startTech, system:plannedStart && plannedStart.system ? plannedStart.system : machineSystem(startSerial), status:"testing", elapsedSeconds:0, startedAt:Date.now(), failures:0, connection:channelType(Number(channelMatch[1]),Number(channelMatch[2])) });
       var startedMachine = machines.find(function (machine) { return machine.serial === startSerial; });
       if (startedMachine) { startedMachine.stage = "KVM"; startedMachine.technician = startTech; startedMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); }
+      if (backendState.remoteReady && plannedStart) backend.remove("queue",startSerial).catch(function () {});
       kvmQueue = kvmQueue.filter(function (row) { return row.serial !== startSerial; }); saveOperations(); render(); channelDetailModal(); showToast("Teste KVM iniciado no canal escolhido.");
     }
     if (action === "toggle-channel") { if (kvmPaused) { showToast("O KVM inteiro está pausado. Retome a estação para alterar este canal."); return; } var toggleSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (toggleSession) { if (toggleSession.status === "paused") { toggleSession.status = "testing"; toggleSession.startedAt = Date.now(); } else { toggleSession.elapsedSeconds = kvmElapsedSeconds(toggleSession); toggleSession.startedAt = null; toggleSession.status = "paused"; } saveOperations(); render(); channelDetailModal(); showToast(toggleSession.status === "paused" ? "Teste pausado. O cronômetro foi congelado." : "Teste retomado. O cronômetro voltou a contar."); } }
     if (action === "fail-channel") { if (kvmPaused) { showToast("Retome o KVM antes de reiniciar o teste."); return; } var failedSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (failedSession) { failedSession.failures += 1; failedSession.elapsedSeconds = 0; failedSession.startedAt = Date.now(); failedSession.status = "testing"; failedSession.lastFailureAt = new Date().toISOString(); var failedMachine = machines.find(function (machine) { return machine.serial === failedSession.serial; }); if (failedMachine) { failedMachine.stage = "KVM"; failedMachine.technician = failedSession.tech; failedMachine.kvmFailures = Number(failedMachine.kvmFailures || 0) + 1; failedMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } saveOperations(); render(); channelDetailModal(); showToast("Falha registrada. A contagem foi zerada para testar a mesma máquina novamente."); } }
     if (action === "reject-channel") { var rejectedSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (rejectedSession) kvmRejectionModal(rejectedSession); }
-    if (action === "confirm-kvm-rejection") { var rejectedKey = element.dataset.key; var rejectionSession = kvmSessions.find(function (item) { return item.key === rejectedKey; }); if (!rejectionSession) { showToast("A sessão do KVM não foi encontrada."); return; } var rejectionData = { id:Date.now(), op:$("#reject-op").value.trim(), serial:$("#reject-serial").value.trim(), issue:$("#reject-problem").value, tech:$("#reject-tech").value, priority:$("#reject-priority").value, notes:$("#reject-notes").value.trim(), elapsedSeconds:0, startedAt:null, stage:0, status:"planned" }; repairRows.unshift(rejectionData); var rejectionMachine = machines.find(function (machine) { return machine.serial === rejectionData.serial; }); if (rejectionMachine) { rejectionMachine.stage = "Reparo"; rejectionMachine.technician = rejectionData.tech; rejectionMachine.priority = rejectionData.priority === "high"; rejectionMachine.priorityLevel = rejectionData.priority; rejectionMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } kvmSessions = kvmSessions.filter(function (item) { return item.key !== rejectedKey; }); saveOperations(); $("#modal").close(); render(); showToast("Máquina reprovada e enviada aos Planejados do Reparo."); }
-    if (action === "approve-channel") { var approvedSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (approvedSession) { var approvedMachine = machines.find(function (machine) { return machine.serial === approvedSession.serial; }); if (approvedMachine) { approvedMachine.stage = "BurnIn"; approvedMachine.certificate = "Pendente"; approvedMachine.actualSystem = ""; approvedMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } kvmSessions = kvmSessions.filter(function (item) { return item.key !== state.selectedChannel; }); saveOperations(); if ($("#modal").open) $("#modal").close(); render(); showToast("KVM aprovado. Aguardando certificado BurnIn."); } }
+    if (action === "confirm-kvm-rejection") { var rejectedKey = element.dataset.key; var rejectionSession = kvmSessions.find(function (item) { return item.key === rejectedKey; }); if (!rejectionSession) { showToast("A sessão do KVM não foi encontrada."); return; } var rejectionData = { id:Date.now(), op:$("#reject-op").value.trim(), serial:$("#reject-serial").value.trim(), issue:$("#reject-problem").value, tech:$("#reject-tech").value, priority:$("#reject-priority").value, notes:$("#reject-notes").value.trim(), elapsedSeconds:0, startedAt:null, stage:0, status:"planned" }; repairRows.unshift(rejectionData); var rejectionMachine = machines.find(function (machine) { return machine.serial === rejectionData.serial; }); if (rejectionMachine) { rejectionMachine.stage = "Reparo"; rejectionMachine.technician = rejectionData.tech; rejectionMachine.priority = rejectionData.priority === "high"; rejectionMachine.priorityLevel = rejectionData.priority; rejectionMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } if (backendState.remoteReady) backend.remove("kvmSession",rejectedKey).catch(function () {}); kvmSessions = kvmSessions.filter(function (item) { return item.key !== rejectedKey; }); saveOperations(); $("#modal").close(); render(); showToast("Máquina reprovada e enviada aos Planejados do Reparo."); }
+    if (action === "approve-channel") { var approvedSession = kvmSessions.find(function (item) { return item.key === state.selectedChannel; }); if (approvedSession) { var approvedMachine = machines.find(function (machine) { return machine.serial === approvedSession.serial; }); if (approvedMachine) { approvedMachine.stage = "BurnIn"; approvedMachine.certificate = "Pendente"; approvedMachine.actualSystem = ""; approvedMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); } if (backendState.remoteReady) backend.remove("kvmSession",state.selectedChannel).catch(function () {}); kvmSessions = kvmSessions.filter(function (item) { return item.key !== state.selectedChannel; }); saveOperations(); if ($("#modal").open) $("#modal").close(); render(); showToast("KVM aprovado. Aguardando certificado BurnIn."); } }
     if (action === "confirm-scan") { if (kvmPaused) { showToast("Retome o KVM inteiro antes de iniciar a bipagem."); return; } var bay = Number($("#scan-bay").value), channel = Number($("#scan-channel").value), selectedBay = bay, selectedChannel = channel, op = $("#scan-op").value.trim(), serial = $("#scan-serial").value.trim(), tech = $("#scan-tech").value; if (!op || !serial) { showToast("Bipe a O.P. e o número de série."); return; } var key = channelKey(bay,channel); if (channelType(bay,channel) === "Inoperante" || kvmSessions.some(function (item) { return item.key === key; })) { showToast("O canal escolhido não está livre."); return; } var plannedScan = kvmQueue.find(function (row) { return row.serial === serial; }); kvmSessions.push({key:key,op:op,serial:serial,tech:tech,system:plannedScan && plannedScan.system ? plannedScan.system : machineSystem(serial),status:"testing",elapsedSeconds:0,startedAt:Date.now(),failures:0,connection:channelType(bay,channel)}); var scannedMachine = machines.find(function (machine) { return machine.serial === serial; }); if (scannedMachine) { scannedMachine.stage = "KVM"; scannedMachine.technician = tech; } kvmQueue = kvmQueue.filter(function (row) { return row.serial !== serial; }); saveOperations(); var next = channel + 1; if (next > (bay === 4 ? 7 : 14)) { bay += 1; next = 1; } if (bay > 4) { bay = 1; next = 1; } state.selectedChannel = key; localStorage.setItem("gpj-selected-channel",state.selectedChannel); render(); window.setTimeout(function () { var baySelect = $("#scan-bay"), channelSelect = $("#scan-channel"); if (baySelect) baySelect.value = String(bay); if (channelSelect) channelSelect.value = String(next); var target = $("#scan-target"); if (target) target.textContent = "Baia " + bay + " · Canal " + String(next).padStart(2,"0"); },0); showToast("Teste iniciado na Baia " + selectedBay + " · Canal " + String(selectedChannel).padStart(2,"0") + "."); }
     if (action === "start-scan") { setView("kvm"); window.setTimeout(function () { var input = $("#scan-op"); if (input) input.focus(); }, 50); }
-    if (action === "save-channels") { $$('[data-channel-config]').forEach(function (select) { channelConfig[channelKey(select.dataset.bay,select.dataset.channel)] = select.value; }); localStorage.setItem("gpj-channels",JSON.stringify(channelConfig)); showToast("Configuração dos canais salva."); }
+    if (action === "save-channels") { $$('[data-channel-config]').forEach(function (select) { channelConfig[channelKey(select.dataset.bay,select.dataset.channel)] = select.value; }); localStorage.setItem("gpj-channels",JSON.stringify(channelConfig)); saveOperations(); showToast("Configuração dos canais salva."); }
     if (action === "delete-serial-batch") {
       var batchIdx = Number(element.dataset.index);
       var batch = serialBatches[batchIdx];
@@ -1007,6 +1161,13 @@
   $("#notification-button").addEventListener("click", function () { openDrawer("notification-drawer"); });
   $("#mobile-add").addEventListener("click", function () { openDrawer("quick-drawer"); });
   $("#profile-button").addEventListener("click", profileModal);
+  $("#modal").addEventListener("close", function () {
+    if (backendState.configured && !backend.getSession()) window.setTimeout(profileModal, 0);
+  });
+  window.addEventListener("gpj:sync", function (event) {
+    backendState.status = event.detail && event.detail.status === "online" ? "online" : "error";
+    updateChrome();
+  });
   $("#theme-button").addEventListener("click", function () {
     var themes = ["light","dark","black"];
     state.theme = themes[(themes.indexOf(state.theme) + 1) % themes.length];
@@ -1030,7 +1191,14 @@
     var actionButton = event.target.closest("[data-action]");
     if (actionButton) handleAction(actionButton.dataset.action, actionButton);
   });
-  document.addEventListener("keydown", function (event) { if (event.key === "Escape") closeDrawers(); });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeDrawers();
+    if (event.key === "Enter" && $("#modal").open && $("#auth-password") && event.target.closest("#modal")) {
+      event.preventDefault();
+      var signInButton = $('[data-action="sign-in"]');
+      if (signInButton && !signInButton.disabled) signInButton.click();
+    }
+  });
   document.addEventListener("change", function (event) {
     if (event.target.id !== "scan-bay" && event.target.id !== "scan-channel") return;
     var target = $("#scan-target");
@@ -1064,6 +1232,17 @@
     render();
   });
   document.documentElement.dataset.theme = state.theme;
+  if (backendState.configured) {
+    state.role = "technician";
+    state.user = "Operador";
+    state.notifications = [];
+    machines = [];
+    repairRows = [];
+    kvmSessions = [];
+    kvmQueue = [];
+    serialBatches = [];
+  }
   render();
+  initializeBackend();
   window.setInterval(updateKvmTimers,1000);
 })();
