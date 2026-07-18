@@ -8,13 +8,13 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-// Markup original do index.html do pacote GPJ Flow. O app.js manipula o DOM
+// Markup original do index.html do pacote PBA Flow. O app.js manipula o DOM
 // diretamente por IDs, então preservamos a estrutura exata.
 const SHELL_HTML = `
 <aside id="sidebar" class="sidebar" aria-label="Navegação principal">
   <div class="brand-lockup">
-    <span class="brand-symbol" aria-hidden="true">G</span>
-    <span><strong>GPJ Flow</strong><small>Fábrica conectada</small></span>
+    <span class="brand-symbol" aria-hidden="true">P</span>
+    <span><strong>PBA Flow</strong><small>Fábrica conectada</small></span>
   </div>
   <button id="sidebar-collapse" class="sidebar-collapse" aria-label="Recolher menu lateral" title="Recolher menu lateral">‹</button>
   <div class="plant-online"><i></i> Sistema operacional</div>
@@ -30,7 +30,7 @@ const SHELL_HTML = `
   <header class="topbar">
     <button id="menu-toggle" class="icon-button mobile-only" aria-label="Abrir menu">☰</button>
     <div class="page-context">
-      <span id="breadcrumb">GPJ / Montagem</span>
+      <span id="breadcrumb">PBA / Montagem</span>
       <strong id="page-title">Visão geral</strong>
     </div>
     <div class="sector-switcher" role="group" aria-label="Área operacional">
