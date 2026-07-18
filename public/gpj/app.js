@@ -19,8 +19,8 @@
   var state = {
     view: "overview",
     sector: "assembly",
-    role: localStorage.getItem("gpj-role") || "developer",
-    user: localStorage.getItem("gpj-user") || "Pedro",
+    role: localStorage.getItem("gpj-role") || "technician",
+    user: localStorage.getItem("gpj-user") || "Técnico",
     repairTab: "active",
     theme: localStorage.getItem("gpj-theme") || "light",
     lastSerial: Number(localStorage.getItem("gpj-last-serial") || 184),
@@ -29,6 +29,9 @@
     traceQuery: "73471",
     traceSelected: "GPJX3520",
     sidebarCollapsed: localStorage.getItem("gpj-sidebar-collapsed") !== "false",
+    repairAlertMinutes: Number(localStorage.getItem("gpj-repair-alert-minutes") || 60),
+    repairCriticalMinutes: Number(localStorage.getItem("gpj-repair-critical-minutes") || 100),
+    biosFixedOp: localStorage.getItem("gpj-bios-fixed-op") || "",
     notifications: [
       { level: "critical", module: "Montagem", time: "Agora", title: "O.P. 73471 é prioridade", text: "O gestor marcou esta ordem como prioridade. Três máquinas aguardam início no KVM." },
       { level: "warning", module: "Reparo", time: "há 8 min", title: "Máquina aguardando peça", text: "GPJX3520 está em espera e já ultrapassou o tempo de atenção configurado." },
@@ -67,9 +70,19 @@
     { id:5, op:"73598", serial:"GPJX3598", issue:"Superaquecimento", notes:"Limpeza concluída, sem troca de peça.", tech:"Pedro", elapsed:"00:36:11", priority:"normal", stage:4, status:"history" }
   ];
   function loadLocal(key, fallback) { try { var value = JSON.parse(localStorage.getItem(key)); return Array.isArray(value) ? value : fallback; } catch (error) { return fallback; } }
+  function loadObject(key, fallback) { try { var value = JSON.parse(localStorage.getItem(key)); return value && typeof value === "object" && !Array.isArray(value) ? value : fallback; } catch (error) { return fallback; } }
   var problems = loadLocal("gpj-problems", defaultProblems);
   var solutions = loadLocal("gpj-solutions", defaultSolutions);
   var parts = loadLocal("gpj-parts", defaultParts);
+  var technicians = loadLocal("gpj-technicians", [
+    { name:"Pedro", registration:"4", shift:"T1", active:true },
+    { name:"Fabio", registration:"1", shift:"T1", active:true },
+    { name:"Washington", registration:"3", shift:"T1", active:true },
+    { name:"Fransmiler", registration:"5", shift:"T1", active:true }
+  ]);
+  var waitReasons = loadLocal("gpj-wait-reasons", ["Aguardando gabinete","Aguardando comercial","Aguardando estoque","Aguardando aprovação do gestor","Aguardando outro setor"]);
+  var biosHistory = loadLocal("gpj-bios-history", []);
+  var opPriorities = loadObject("gpj-op-priorities", {});
   var repairRows = loadLocal("gpj-repairs", defaultRepairs);
   var defaultMachines = [
     { op:"73471", serial:"GPJX3520", code:"41007", expectedSystem:"Windows 10 Pro", actualSystem:"Windows 11 Pro", stage:"BurnIn", sector:"Montagem", result:"Aprovada", certificate:"Recebido", technician:"Pedro", priority:true, updated:"15:42" },
@@ -92,6 +105,10 @@
     localStorage.setItem("gpj-problems", JSON.stringify(problems));
     localStorage.setItem("gpj-solutions", JSON.stringify(solutions));
     localStorage.setItem("gpj-parts", JSON.stringify(parts));
+    localStorage.setItem("gpj-technicians", JSON.stringify(technicians));
+    localStorage.setItem("gpj-wait-reasons", JSON.stringify(waitReasons));
+    localStorage.setItem("gpj-bios-history", JSON.stringify(biosHistory));
+    localStorage.setItem("gpj-op-priorities", JSON.stringify(opPriorities));
     localStorage.setItem("gpj-repairs", JSON.stringify(repairRows));
     localStorage.setItem("gpj-machines", JSON.stringify(machines));
     localStorage.setItem("gpj-kvm-sessions", JSON.stringify(kvmSessions));
@@ -277,7 +294,9 @@
   function normalizeRepairTimers() {
     repairRows.forEach(function (repair) {
       if (!Number.isFinite(repair.elapsedSeconds)) repair.elapsedSeconds = legacyElapsedSeconds(repair.elapsed);
-      if (repair.status === "active" && !repair.startedAt) repair.startedAt = Date.now();
+      if (repair.status === "active" && repair.timerPaused == null) repair.timerPaused = false;
+      if (repair.status === "active" && !repair.timerPaused && !repair.startedAt) repair.startedAt = Date.now();
+      if (repair.timerPaused) repair.startedAt = null;
       if (repair.status !== "active") repair.startedAt = null;
       delete repair.elapsed;
     });
@@ -286,8 +305,26 @@
 
   function repairElapsedSeconds(repair) {
     var seconds = Number(repair.elapsedSeconds || 0);
-    if (repair.status === "active" && repair.startedAt) seconds += Math.max(0,Math.floor((Date.now() - repair.startedAt) / 1000));
+    if (repair.status === "active" && !repair.timerPaused && repair.startedAt) seconds += Math.max(0,Math.floor((Date.now() - repair.startedAt) / 1000));
     return seconds;
+  }
+
+  function autoPauseRepairShift() {
+    var now = new Date();
+    var dayKey = now.toISOString().slice(0,10);
+    if (now.getHours() < 18 || (now.getHours() === 18 && now.getMinutes() < 5)) return;
+    if (localStorage.getItem("gpj-repair-autopause-day") === dayKey) return;
+    var changed = false;
+    repairRows.forEach(function (repair) {
+      if (repair.status !== "active" || repair.timerPaused) return;
+      repair.elapsedSeconds = repairElapsedSeconds(repair);
+      repair.startedAt = null;
+      repair.timerPaused = true;
+      repair.pauseReason = "Pausa automática do turno · 18:05";
+      changed = true;
+    });
+    localStorage.setItem("gpj-repair-autopause-day",dayKey);
+    if (changed) { saveOperations(); render(); showToast("18:05 · Todos os cronômetros do Reparo foram pausados automaticamente."); }
   }
 
   function formatClock(totalSeconds) {
@@ -305,7 +342,15 @@
     });
     $$('[data-repair-timer]').forEach(function (timer) {
       var repair = repairRows.find(function (item) { return String(item.id) === timer.dataset.repairTimer; });
-      if (repair) timer.textContent = formatClock(repairElapsedSeconds(repair));
+      if (repair) {
+        var elapsed = repairElapsedSeconds(repair);
+        timer.textContent = formatClock(elapsed);
+        var card = timer.closest(".repair-card");
+        if (card) {
+          card.classList.toggle("time-alert",elapsed >= state.repairAlertMinutes * 60 && elapsed < state.repairCriticalMinutes * 60);
+          card.classList.toggle("time-critical",elapsed >= state.repairCriticalMinutes * 60);
+        }
+      }
     });
   }
 
@@ -369,25 +414,50 @@
     return osOptions.map(function (system) { return "<option" + (system === selected ? " selected" : "") + ">" + system + "</option>"; }).join("");
   }
 
+  function technicianOptions(selected, includeUnassigned) {
+    var names = technicians.filter(function (item) { return item.active !== false; }).map(function (item) { return item.name; });
+    if (includeUnassigned) names.unshift("Sem técnico");
+    return names.map(function (name) { return "<option" + (name === selected ? " selected" : "") + ">" + escapeHtml(name) + "</option>"; }).join("");
+  }
+
+  function opPriority(op, fallback) {
+    return opPriorities[String(op || "")] || fallback || "normal";
+  }
+
+  function applyOpPriority(op, priority) {
+    op = String(op || "").trim();
+    if (!op) return;
+    opPriorities[op] = priority;
+    machines.forEach(function (machine) {
+      if (machine.op !== op) return;
+      machine.priorityLevel = priority;
+      machine.priority = priority === "high";
+    });
+    repairRows.forEach(function (repair) { if (repair.op === op) repair.priority = priority; });
+    kvmQueue.forEach(function (row) { if (row.op === op) row.priority = priority === "high"; });
+  }
+
   function pageHead(kicker, title, description, actions) {
     return "<section class=\"page-head\"><div><span class=\"eyebrow\">" + kicker + "</span><h1>" + title + "</h1><p>" + description + "</p></div><div class=\"head-actions\">" + (actions || "") + "</div></section>";
   }
 
   function getNavItems() {
     var items = [
-      ["overview", "01", "Visão geral"],
-      ["repairs", "02", "Reparos"]
+      ["overview", "01", "Visão geral"]
     ];
     if (state.sector === "assembly") {
-      items.push(["kvm", "03", "KVM · Run-in"]);
-      items.push(["kvm-config", "CFG", "Config. canais"]);
-      items.push(["linkage", "04", "Vinculação"]);
-      items.push(["burnin", "05", "BurnIn"]);
+      items.push(["linkage", "02", "Vinculação"]);
+      items.push(["bios", "03", "BIOS"]);
+      items.push(["kvm", "04", "KVM · Run-in"]);
     }
-    items.push(["parts", "PÇ", "Peças"]);
-    items.push(["trace", "06", "Rastreabilidade"]);
-    items.push(["indicators", "07", "Indicadores"]);
+    items.push(["repairs", "05", "Reparos"]);
+    if (state.sector === "assembly") items.push(["burnin", "06", "BurnIn"]);
+    items.push(["trace", "07", "Rastreabilidade"]);
     items.push(["registry", "08", "Cadastros"]);
+    if (state.role === "manager") {
+      items.push(["manager-settings", "09", "Gestão de O.P."]);
+      items.push(["indicators", "10", "Indicadores"]);
+    }
     if (state.role === "developer") items.push(["integration", "DEV", "Integração API"]);
     return items;
   }
@@ -464,21 +534,32 @@
     var counts = { active:0, planned:0, waiting:0, history:0 };
     repairRows.forEach(function (row) { counts[row.status] = (counts[row.status] || 0) + 1; });
     var visibleRows = repairRows.filter(function (row) { return row.status === state.repairTab; });
-    var cards = visibleRows.map(function (row) {
+    if (state.repairTab === "active") visibleRows.sort(function (a,b) { return Number(a.timerPaused) - Number(b.timerPaused) || (a.tech || "").localeCompare(b.tech || ""); });
+    function repairCard(row) {
       var stageHtml = stages.map(function (name, index) {
         var status = index < row.stage ? "done" : index === row.stage ? "active" : "";
-        return "<div class=\"stage " + status + "\"><strong>" + name + "</strong><small>" + (index < row.stage ? "Concluído" : index === row.stage ? "Em andamento" : "Aguardando") + "</small></div>";
+        var stageLabel = index < row.stage ? "Concluído" : index === row.stage ? (row.timerPaused ? "Pausado" : "Em andamento") : "Aguardando";
+        return "<div class=\"stage " + status + "\"><strong>" + name + "</strong><small>" + stageLabel + "</small></div>";
       }).join("");
       var priorityLabel = row.priority === "high" ? "Alta" : row.priority === "low" ? "Baixa" : "Normal";
       var priorityTone = row.priority === "high" ? "red" : row.priority === "low" ? "blue" : "green";
+      var elapsed = repairElapsedSeconds(row);
+      var timeLevel = elapsed >= state.repairCriticalMinutes * 60 ? "critical" : elapsed >= state.repairAlertMinutes * 60 ? "alert" : "normal";
       var detailAction = "<button class=\"button button--ghost\" data-action=\"repair-details\" data-id=\"" + row.id + "\">Ver detalhes</button>";
       var actions = detailAction + "<button class=\"button\" data-action=\"edit-repair\" data-id=\"" + row.id + "\">Editar</button>";
-      if (row.status === "active") actions = "<button class=\"button\" data-action=\"pause-repair\" data-id=\"" + row.id + "\">Pausar</button><button class=\"button button--primary\" data-action=\"advance-repair\" data-id=\"" + row.id + "\" data-serial=\"" + row.serial + "\">Concluir etapa</button>" + actions;
+      if (row.status === "active") actions = (row.timerPaused ? "<button class=\"button button--primary\" data-action=\"resume-repair\" data-id=\"" + row.id + "\">▶ Retomar</button>" : "<button class=\"button\" data-action=\"pause-repair\" data-id=\"" + row.id + "\">Ⅱ Pausar cronômetro</button>") + "<button class=\"button button--warning\" data-action=\"wait-repair\" data-id=\"" + row.id + "\">Adicionar em espera</button><button class=\"button\" data-action=\"correct-repair-time\" data-id=\"" + row.id + "\">Corrigir cronômetro</button><button class=\"button button--primary\" data-action=\"advance-repair\" data-id=\"" + row.id + "\" data-serial=\"" + row.serial + "\">Concluir etapa</button>" + actions;
       if (row.status === "planned") actions = "<button class=\"button button--primary\" data-action=\"start-repair\" data-id=\"" + row.id + "\">Iniciar reparo</button>" + actions;
-      if (row.status === "waiting") actions = "<button class=\"button button--primary\" data-action=\"resume-repair\" data-id=\"" + row.id + "\">Retomar</button>" + actions;
+      if (row.status === "waiting") actions = "<button class=\"button button--primary\" data-action=\"resume-repair\" data-id=\"" + row.id + "\">Retomar serviço</button><button class=\"button\" data-action=\"correct-repair-time\" data-id=\"" + row.id + "\">Corrigir cronômetro</button>" + actions;
       if (row.status === "history") actions = detailAction + "<button class=\"button\" data-action=\"edit-repair\" data-id=\"" + row.id + "\">Corrigir registro</button><button class=\"button button--danger\" data-action=\"delete-repair\" data-id=\"" + row.id + "\">Excluir</button>";
-      return "<article class=\"repair-card priority-" + row.priority + "\"><div class=\"repair-top\"><div class=\"repair-identity\"><div class=\"repair-title\"><span>OP " + escapeHtml(row.op) + "</span><strong>" + escapeHtml(row.serial) + "</strong></div><div class=\"repair-meta\"><span class=\"repair-meta-item\"><b>Problema</b>" + escapeHtml(row.issue) + "</span><span class=\"repair-meta-item\"><b>Técnico</b>" + escapeHtml(row.tech) + "</span>" + pill(priorityLabel,priorityTone) + "</div></div><div class=\"repair-clock-block\"><span>Tempo total</span><time class=\"mono live-repair-clock\" data-repair-timer=\"" + row.id + "\">" + formatClock(repairElapsedSeconds(row)) + "</time></div></div>" + (row.notes ? "<p class=\"repair-note\">" + escapeHtml(row.notes) + "</p>" : "") + (row.status === "history" ? "" : "<div class=\"stage-track\">" + stageHtml + "</div>") + "<div class=\"repair-actions\">" + actions + "</div></article>";
-    }).join("");
+      var stateLabel = row.status === "waiting" ? (row.waitingReason || "Em espera") : row.timerPaused ? (row.pauseReason || "Cronômetro pausado") : "Cronômetro em andamento";
+      return "<article class=\"repair-card priority-" + row.priority + " timer-" + (row.timerPaused ? "paused" : "running") + " time-" + timeLevel + "\"><div class=\"repair-top\"><div class=\"repair-identity\"><div class=\"repair-title\"><span>OP " + escapeHtml(row.op) + "</span><strong>" + escapeHtml(row.serial) + "</strong></div><div class=\"repair-meta\"><span class=\"repair-meta-item\"><b>Problema</b>" + escapeHtml(row.issue) + "</span><span class=\"repair-meta-item\"><b>Técnico</b>" + escapeHtml(row.tech) + "</span>" + pill(priorityLabel,priorityTone) + pill(stateLabel,row.status === "waiting" || row.timerPaused ? "amber" : "green") + "</div></div><div class=\"repair-clock-block\"><span>Tempo total</span><time class=\"mono live-repair-clock\" data-repair-timer=\"" + row.id + "\">" + formatClock(elapsed) + "</time><small>" + (timeLevel === "critical" ? "Crítico" : timeLevel === "alert" ? "Em alerta" : "Dentro do tempo") + "</small></div></div>" + (row.waitingReason ? "<p class=\"repair-wait-reason\"><strong>Dependência externa:</strong> " + escapeHtml(row.waitingReason) + (row.waitingNotes ? " · " + escapeHtml(row.waitingNotes) : "") + "</p>" : "") + (row.notes ? "<p class=\"repair-note\">" + escapeHtml(row.notes) + "</p>" : "") + (row.status === "history" ? "" : "<div class=\"stage-track\">" + stageHtml + "</div>") + "<div class=\"repair-actions\">" + actions + "</div></article>";
+    }
+    var cards = "";
+    if (state.repairTab === "active") {
+      var grouped = {};
+      visibleRows.forEach(function (row) { (grouped[row.tech] = grouped[row.tech] || []).push(row); });
+      cards = Object.keys(grouped).sort().map(function (tech) { var running = grouped[tech].filter(function (row) { return !row.timerPaused; }).length; return "<section class=\"technician-repair-group\"><div class=\"technician-group-head\"><span><strong>" + escapeHtml(tech) + "</strong><small>" + running + " rodando · " + (grouped[tech].length - running) + " pausado(s)</small></span>" + pill(running ? "Em atividade" : "Sem cronômetro ativo",running ? "green" : "amber") + "</div>" + grouped[tech].map(repairCard).join("") + "</section>"; }).join("");
+    } else cards = visibleRows.map(repairCard).join("");
     if (!cards) cards = "<section class=\"panel empty-state\"><strong>Nenhum reparo nesta aba.</strong><small>Use “Planejar reparo” para incluir uma máquina.</small></section>";
     var plannedPreview = repairRows.filter(function (row) { return row.status === "planned" || row.status === "waiting"; }).map(function (row) {
       return "<button class=\"planning-row priority-" + row.priority + "\" data-action=\"repair-details\" data-id=\"" + row.id + "\"><span><strong>OP " + escapeHtml(row.op) + " · " + escapeHtml(row.serial) + "</strong><small>" + escapeHtml(row.issue) + " · " + escapeHtml(row.tech) + "</small></span>" + pill(row.status === "waiting" ? "Em espera" : "Planejada", row.status === "waiting" ? "amber" : "blue") + "</button>";
@@ -491,7 +572,7 @@
       return "<div class=\"workload-row\"><span><strong>" + stage + "</strong><small>" + value + " máquina" + (value === 1 ? "" : "s") + "</small></span><i><b style=\"width:" + width + "%\"></b></i></div>";
     }).join("");
     return "<div class=\"page-stack\">" + pageHead("Operação técnica", "Reparos · " + sectorLabels[state.sector], "Diagnóstico, peças, montagem, testes e finalização com histórico por tentativa.", "<button class=\"button button--primary\" data-action=\"new-repair\">+ Planejar reparo</button>") +
-      "<section class=\"metrics\">" + metric("Fila atual",String(counts.planned + counts.waiting),"Planejados e em espera","fila","amber") + metric("Ativos",String(counts.active),"Trabalhos em andamento","agora","green") + metric("Em espera",String(counts.waiting),"Atividades pausadas","atenção","amber") + metric("Finalizados",String(counts.history),"Histórico local","total","blue") + "</section>" +
+      "<section class=\"metrics\">" + metric("Fila atual",String(counts.planned),"Aguardando início","fila","amber") + metric("Ativos",String(counts.active),"Rodando ou pausados no técnico","agora","green") + metric("Em espera",String(counts.waiting),"Dependência de outro serviço","atenção","amber") + metric("Finalizados",String(counts.history),"Histórico local","total","blue") + "</section>" +
       "<section class=\"repair-command-grid\"><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Planejamento de reparos</span><h2>Fila que o técnico pode assumir</h2></div><button class=\"button\" data-action=\"new-repair\">+ Nova O.P.</button></div><div class=\"planning-list\">" + plannedPreview + "</div></div><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Carga atual</span><h2>Distribuição por etapa</h2></div></div><div class=\"workload-list\">" + loadRows + "</div></div></section>" +
       "<div class=\"tabs\"><button data-repair-tab=\"active\" class=\"" + (state.repairTab === "active" ? "active" : "") + "\">Ativos (" + counts.active + ")</button><button data-repair-tab=\"planned\" class=\"" + (state.repairTab === "planned" ? "active" : "") + "\">Planejados (" + counts.planned + ")</button><button data-repair-tab=\"waiting\" class=\"" + (state.repairTab === "waiting" ? "active" : "") + "\">Em espera (" + counts.waiting + ")</button><button data-repair-tab=\"history\" class=\"" + (state.repairTab === "history" ? "active" : "") + "\">Histórico (" + counts.history + ")</button></div><section class=\"repair-cards\">" + cards + "</section></div>";
   }
@@ -584,12 +665,13 @@
 
   function renderLinkage() {
     var batchRows = serialBatches.length ? serialBatches.map(function (batch, index) {
-      return "<tr><td class=\"mono\">" + escapeHtml(batch.createdAt || "—") + "</td><td class=\"mono\">" + escapeHtml(batch.op) + "</td><td class=\"mono\">" + escapeHtml(batch.code) + "</td><td>" + escapeHtml(batch.system) + "</td><td class=\"mono\">" + escapeHtml(batch.firstSerial) + " → " + escapeHtml(batch.lastSerial) + "</td><td>" + batch.quantity + "</td><td><button class=\"button button--danger\" data-action=\"delete-serial-batch\" data-index=\"" + index + "\">Excluir</button></td></tr>";
-    }).join("") : "<tr><td colspan=\"7\" class=\"empty-table\">Nenhum lote criado ainda. Use o formulário ao lado para gerar a primeira faixa.</td></tr>";
+      var priority = opPriority(batch.op,batch.priority);
+      return "<tr><td class=\"mono\">" + escapeHtml(batch.createdAt || "—") + "</td><td class=\"mono\">" + escapeHtml(batch.op) + "</td><td>" + pill(priority === "high" ? "Alta" : priority === "low" ? "Baixa" : "Normal",priority === "high" ? "red" : priority === "low" ? "blue" : "green") + "</td><td class=\"mono\">" + escapeHtml(batch.code) + "</td><td>" + escapeHtml(batch.system) + "</td><td class=\"mono\">" + escapeHtml(batch.firstSerial) + " → " + escapeHtml(batch.lastSerial) + "</td><td>" + batch.quantity + "</td><td><button class=\"button button--danger\" data-action=\"delete-serial-batch\" data-index=\"" + index + "\">Excluir</button></td></tr>";
+    }).join("") : "<tr><td colspan=\"8\" class=\"empty-table\">Nenhum lote criado ainda. Use o formulário ao lado para gerar a primeira faixa.</td></tr>";
     var totalMachines = serialBatches.reduce(function (acc, b) { return acc + Number(b.quantity || 0); }, 0);
     return "<div class=\"page-stack\">" + pageHead("Montagem","Vinculação e seriais","Crie lotes seguros por mês e ano. Impressão Zebra ficará preparada como próxima etapa.","") +
-      "<section class=\"serial-layout\"><div class=\"panel panel-pad\"><div class=\"last-serial\"><span>Último serial criado</span><strong>" + serialValue(state.lastSerial) + "</strong><small>Competência " + currentPrefix() + " · sequência protegida contra duplicidade</small></div><form id=\"serial-form\" class=\"serial-form\" style=\"margin-top:16px\"><label class=\"field\">Quantidade<input id=\"serial-quantity\" type=\"number\" min=\"1\" max=\"9999\" value=\"10\"></label><label class=\"field\">O.P.<input id=\"serial-op\" required placeholder=\"Ex.: 73471\"></label><label class=\"field\">Código da máquina<input id=\"serial-code\" required placeholder=\"Código do produto\"></label><label class=\"field\">Sistema operacional esperado<select id=\"serial-os\">" + osSelectOptions("Windows 10 Pro") + "</select></label><label class=\"field\">Layout<select id=\"serial-layout\"><option>Máquina comum</option><option>Backboy</option><option>Etiqueta da caixa</option></select></label><label class=\"field field--wide\">Configuração e componentes<textarea id=\"serial-components\" placeholder=\"Fonte, SSD, placa-mãe, memória...\"></textarea></label><div class=\"validation-note field--wide\"><strong>Validação automática</strong><span>O sistema escolhido ficará preso à O.P., ao código e a cada serial criado. O BurnIn deverá confirmar exatamente o mesmo sistema antes da liberação.</span></div><button class=\"button button--primary field--wide\" type=\"submit\">Criar faixa de números de série</button></form></div><div class=\"panel coming-soon\"><span class=\"eyebrow\">Zebra · Em breve</span><strong>Etiqueta 70 × 30 mm</strong><p>A geração de serial já funciona localmente. A saída ZPL será conectada depois do modelo e resolução da impressora serem confirmados.</p><div class=\"label-preview\"><div><small>OP 73471 · CÓD. 41007</small><br><strong>GPJ OFFICE · SSD 480 GB</strong><div class=\"barcode\"></div><small>" + serialValue(state.lastSerial) + " · OP 73471</small></div><div class=\"fake-qr\" aria-label=\"Exemplo de QR Code\"></div></div></div></section>" +
-      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Histórico de vinculações</span><h2>" + serialBatches.length + " lote(s) · " + totalMachines + " máquina(s) reservada(s)</h2></div>" + (serialBatches.length ? "<button class=\"button button--danger\" data-action=\"clear-serial-batches\">Limpar histórico</button>" : "") + "</div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Criado em</th><th>O.P.</th><th>Código</th><th>Sistema</th><th>Faixa de seriais</th><th>Qtd.</th><th>Ações</th></tr></thead><tbody>" + batchRows + "</tbody></table></div></section></div>";
+      "<section class=\"serial-layout\"><div class=\"panel panel-pad\"><div class=\"last-serial\"><span>Último serial criado</span><strong>" + serialValue(state.lastSerial) + "</strong><small>Competência " + currentPrefix() + " · sequência protegida contra duplicidade</small></div><form id=\"serial-form\" class=\"serial-form\" style=\"margin-top:16px\"><label class=\"field\">Quantidade<input id=\"serial-quantity\" type=\"number\" min=\"1\" max=\"9999\" value=\"10\"></label><label class=\"field\">O.P.<input id=\"serial-op\" required placeholder=\"Ex.: 73471\"></label><label class=\"field\">Prioridade da O.P.<select id=\"serial-priority\"><option value=\"normal\">Normal</option><option value=\"high\">Alta</option><option value=\"low\">Baixa</option></select></label><label class=\"field\">Código da máquina<input id=\"serial-code\" required placeholder=\"Código do produto\"></label><label class=\"field\">Sistema operacional esperado<select id=\"serial-os\">" + osSelectOptions("Windows 10 Pro") + "</select></label><label class=\"field\">Layout<select id=\"serial-layout\"><option>Máquina comum</option><option>Backboy</option><option>Etiqueta da caixa</option></select></label><label class=\"field field--wide\">Configuração e componentes<textarea id=\"serial-components\" placeholder=\"Fonte, SSD, placa-mãe, memória...\"></textarea></label><div class=\"validation-note field--wide\"><strong>Validação automática</strong><span>O sistema e a prioridade ficarão presos à O.P., ao código e a cada serial criado.</span></div><button class=\"button button--primary field--wide\" type=\"submit\">Criar faixa de números de série</button></form></div><div class=\"panel coming-soon\"><span class=\"eyebrow\">Zebra · Em breve</span><strong>Etiqueta 70 × 30 mm</strong><p>A geração de serial já funciona localmente. A saída ZPL será conectada depois do modelo e resolução da impressora serem confirmados.</p><div class=\"label-preview\"><div><small>OP 73471 · CÓD. 41007</small><br><strong>GPJ OFFICE · SSD 480 GB</strong><div class=\"barcode\"></div><small>" + serialValue(state.lastSerial) + " · OP 73471</small></div><div class=\"fake-qr\" aria-label=\"Exemplo de QR Code\"></div></div></div></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Histórico de vinculações</span><h2>" + serialBatches.length + " lote(s) · " + totalMachines + " máquina(s) reservada(s)</h2></div>" + (serialBatches.length ? "<button class=\"button button--danger\" data-action=\"clear-serial-batches\">Limpar histórico</button>" : "") + "</div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Criado em</th><th>O.P.</th><th>Prioridade</th><th>Código</th><th>Sistema</th><th>Faixa de seriais</th><th>Qtd.</th><th>Ações</th></tr></thead><tbody>" + batchRows + "</tbody></table></div></section></div>";
   }
 
   function renderBurnin() {
@@ -601,7 +683,7 @@
     var validated = burninMachines.filter(function (machine) { return machineValidation(machine).key === "validated"; }).length;
     var mismatches = burninMachines.filter(function (machine) { return machineValidation(machine).key === "mismatch"; }).length;
     var pending = burninMachines.filter(function (machine) { return machineValidation(machine).key === "pending"; }).length;
-    return "<div class=\"page-stack\">" + pageHead("Qualidade automatizada","BurnInTest","Resultados do controle.csv com importação idempotente e rastreabilidade por execução.","<button class=\"button\" data-action=\"import-csv\">↑ Importar CSV</button><button class=\"button button--primary\" data-view=\"integration\">Configurar agente</button>") +
+    return "<div class=\"page-stack\">" + pageHead("Qualidade automatizada","BurnInTest","Resultados do controle.csv com importação idempotente e rastreabilidade por execução.",(state.role === "developer" ? "<button class=\"button\" data-action=\"import-csv\">↑ Importar CSV</button><button class=\"button button--primary\" data-view=\"integration\">Configurar agente</button>" : "")) +
       "<section class=\"metrics\">" + metric("Testados hoje",String(burninMachines.length),validated + " validados","ao vivo","green") + metric("Sistema correto",String(validated),mismatches + " divergência(s)",mismatches ? "bloqueio" : "ok",mismatches ? "red" : "green") + metric("CPU máxima média","66,9 °C","Limite 90 °C","-2,3°","green") + metric("Certificados pendentes",String(pending),"Aguardando agente",pending ? "atenção" : "ok",pending ? "amber" : "green") + "</section><section class=\"certificate-strip\"><div><span>Regra de liberação</span><strong>Esperado na Vinculação = Instalado no certificado</strong></div><p>Se o certificado não chegar ou o sistema for diferente, o Carcará alerta e a máquina não aparece como liberada.</p></section><section class=\"panel\"><div class=\"panel-head\"><div><span>Últimas execuções</span><h2>Banco BurnInTest e certificados</h2></div>" + pill("Conferência automática","green") + "</div><div class=\"table-scroll\"><table class=\"data-table burnin-table\"><thead><tr><th>Hora</th><th>O.P.</th><th>Serial</th><th>Resultado</th><th>CPU máx.</th><th>Sistema esperado</th><th>Sistema instalado</th><th>Certificação</th></tr></thead><tbody>" + rows + "</tbody></table></div></section></div>";
   }
 
@@ -814,8 +896,15 @@
   }
 
   function renderRegistry() {
-    return "<div class=\"page-stack\">" + pageHead("Cadastros","Base operacional","Técnicos, problemas, peças, canais e parâmetros compartilhados com auditoria.","<button class=\"button button--primary\" data-action=\"new-registry\">+ Novo cadastro</button>") +
-      "<section class=\"metrics\">" + metric("Técnicos","14","9 ativos no turno","ativos","green") + metric("Problemas","23","Categorias cadastradas","+2","blue") + metric("Peças","186","12 em atenção","estoque","amber") + metric("Canais KVM","49","43 operantes","87,8%","green") + "</section><section class=\"panel\"><div class=\"panel-head\"><div><span>Cadastro central</span><h2>Técnicos</h2></div></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Nome</th><th>Matrícula</th><th>Turno</th><th>Situação</th><th>Ações</th></tr></thead><tbody>" + [["Fabio","1","T1"],["Fransmiler","5","T1"],["Pedro","4","T1"],["Washington","3","T1"]].map(function (row) { return "<tr><td><strong>" + row[0] + "</strong></td><td>" + row[1] + "</td><td>" + row[2] + "</td><td>" + pill("Ativo","green") + "</td><td><button class=\"button\" data-action=\"edit-registry\">Editar</button></td></tr>"; }).join("") + "</tbody></table></div></section></div>";
+    var partRows = parts.map(function (part,index) { return "<tr><td class=\"mono\"><strong>" + escapeHtml(part.code) + "</strong></td><td>" + escapeHtml(part.description) + "</td><td><button class=\"button\" data-action=\"edit-part\" data-index=\"" + index + "\">Editar</button> <button class=\"button button--danger\" data-action=\"delete-part\" data-index=\"" + index + "\">Excluir</button></td></tr>"; }).join("");
+    var problemRows = problems.map(function (problem,index) { return "<li><span>" + escapeHtml(problem) + "</span><button class=\"button button--danger\" data-action=\"delete-problem\" data-index=\"" + index + "\">Excluir</button></li>"; }).join("");
+    var technicianRows = technicians.map(function (tech,index) { return "<tr><td><strong>" + escapeHtml(tech.name) + "</strong></td><td>" + escapeHtml(tech.registration) + "</td><td>" + escapeHtml(tech.shift) + "</td><td>" + pill(tech.active === false ? "Inativo" : "Ativo",tech.active === false ? "amber" : "green") + "</td><td><button class=\"button button--danger\" data-action=\"delete-technician\" data-index=\"" + index + "\">Excluir</button></td></tr>"; }).join("");
+    return "<div class=\"page-stack\">" + pageHead("Cadastros","Base operacional unificada","Peças, técnicos e problemas usados no Reparo e no KVM, todos no mesmo lugar.","") +
+      "<section class=\"metrics\">" + metric("Técnicos",String(technicians.length),"Equipe cadastrada","ativos","green") + metric("Problemas",String(problems.length),"Categorias do reparo","lista","blue") + metric("Peças",String(parts.length),"Códigos disponíveis","base","amber") + metric("Canais KVM","49","43 operantes","87,8%","green") + "</section>" +
+      "<section class=\"registry-grid\"><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Novo cadastro</span><h2>Técnico</h2></div></div><form id=\"technician-form\" class=\"form-stack\"><label>Nome<input id=\"technician-name\" required placeholder=\"Nome do técnico\"></label><label>Matrícula<input id=\"technician-registration\" required placeholder=\"Matrícula\"></label><label>Turno<input id=\"technician-shift\" value=\"T1\"></label><button class=\"button button--primary\" type=\"submit\">Cadastrar técnico</button></form></div><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Novo cadastro</span><h2>Problema</h2></div></div><form id=\"problem-form\" class=\"form-stack\"><label>Descrição<input id=\"registry-problem-name\" required placeholder=\"Ex.: BIOS não salva\"></label><button class=\"button button--primary\" type=\"submit\">Cadastrar problema</button></form><ul class=\"registry-list\">" + problemRows + "</ul></div></section>" +
+      "<section class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Novo cadastro</span><h2>Peça</h2></div></div><form id=\"part-form\" class=\"part-form\"><label class=\"field\">Código<input id=\"part-code\" required placeholder=\"Ex.: 41007\"></label><label class=\"field\">Descrição<input id=\"part-description\" required placeholder=\"Ex.: Placa-mãe\"></label><button class=\"button button--primary\" type=\"submit\">Cadastrar peça</button></form></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Equipe</span><h2>Técnicos cadastrados</h2></div></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Nome</th><th>Matrícula</th><th>Turno</th><th>Situação</th><th>Ações</th></tr></thead><tbody>" + technicianRows + "</tbody></table></div></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Estoque técnico</span><h2>Peças cadastradas</h2></div></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Código</th><th>Descrição</th><th>Ações</th></tr></thead><tbody>" + partRows + "</tbody></table></div></section></div>";
   }
 
   function renderIntegration() {
@@ -828,8 +917,8 @@
 
   function render() {
     updateChrome();
-    var renderers = { overview: renderOverview, repairs: renderRepairs, kvm: renderKvm, "kvm-config": renderKvmConfig, parts: renderParts, linkage: renderLinkage, burnin: renderBurnin, trace: renderTrace, indicators: renderIndicators, registry: renderRegistry, integration: renderIntegration };
-    var pageNames = { overview:"Visão geral",repairs:"Reparos",kvm:"KVM · Run-in","kvm-config":"Configuração de canais",parts:"Peças",linkage:"Vinculação",burnin:"BurnIn",trace:"Rastreabilidade",indicators:"Indicadores",registry:"Cadastros",integration:"Integração API" };
+    var renderers = { overview: renderOverview, linkage: renderLinkage, bios: renderBios, kvm: renderKvm, "kvm-config": renderKvmConfig, repairs: renderRepairs, burnin: renderBurnin, trace: renderTrace, indicators: renderIndicators, registry: renderRegistry, "manager-settings": renderManagerSettings, integration: renderIntegration };
+    var pageNames = { overview:"Visão geral",linkage:"Vinculação",bios:"BIOS",kvm:"KVM · Run-in","kvm-config":"Configuração de canais",repairs:"Reparos",burnin:"BurnIn",trace:"Rastreabilidade",indicators:"Indicadores",registry:"Cadastros","manager-settings":"Gestão de O.P.",integration:"Integração API" };
     $("#page-title").textContent = pageNames[state.view] || "PBA Flow";
     $("#content").innerHTML = (renderers[state.view] || renderOverview)();
     updateKvmTimers();
@@ -841,6 +930,11 @@
       showToast("A configuração da API é exclusiva do perfil DEV.");
       return;
     }
+    if ((view === "indicators" || view === "manager-settings") && state.role !== "manager") {
+      showToast("Esta área é exclusiva do gestor.");
+      return;
+    }
+    if (view === "parts") view = "registry";
     if (state.view === view) return;
     state.view = view;
     $("#sidebar").classList.remove("open");
@@ -916,7 +1010,7 @@
   function repairModal(row) {
     row = row || { op:"", serial:"", issue:problems[0] || "", tech:"Sem técnico", priority:"normal", notes:"" };
     var problemOptions = problems.map(function (problem) { return "<option" + (problem === row.issue ? " selected" : "") + ">" + escapeHtml(problem) + "</option>"; }).join("");
-    var techOptions = ["Sem técnico","Pedro","Fabio","Washington"].map(function (tech) { return "<option" + (tech === row.tech ? " selected" : "") + ">" + tech + "</option>"; }).join("");
+    var techOptions = technicianOptions(row.tech,true);
     openModal("Planejamento", row.id ? "Editar reparo" : "Novo reparo", "<div class=\"repair-form-grid\"><label class=\"field\">O.P.<input id=\"new-op\" value=\"" + escapeHtml(row.op) + "\" placeholder=\"Número da O.P.\"></label><label class=\"field\">Número de série<input id=\"new-serial\" value=\"" + escapeHtml(row.serial) + "\" placeholder=\"Número de série\"></label><label class=\"field problem-field\">Problema cadastrado<select id=\"new-problem\">" + problemOptions + "</select><button class=\"inline-link\" type=\"button\" data-action=\"add-problem\">+ Cadastrar outro problema</button></label><label class=\"field\">Técnico planejado<select id=\"new-tech\">" + techOptions + "</select></label><label class=\"field\">Prioridade<select id=\"new-priority\"><option value=\"normal\"" + (row.priority === "normal" ? " selected" : "") + ">Normal</option><option value=\"high\"" + (row.priority === "high" ? " selected" : "") + ">Alta</option><option value=\"low\"" + (row.priority === "low" ? " selected" : "") + ">Baixa</option></select></label><label class=\"field notes-field\">Observações<textarea id=\"new-notes\" placeholder=\"Detalhes úteis para o diagnóstico\">" + escapeHtml(row.notes || "") + "</textarea></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-repair\" data-id=\"" + (row.id || "") + "\">" + (row.id ? "Salvar alterações" : "Adicionar à fila") + "</button></div>");
   }
 
@@ -931,6 +1025,18 @@
     openModal("Cadastro de peças", index == null ? "Nova peça" : "Editar peça", "<div class=\"form-stack\"><label>Código<input id=\"modal-part-code\" value=\"" + escapeHtml(part.code) + "\"></label><label>Descrição<input id=\"modal-part-description\" value=\"" + escapeHtml(part.description) + "\"></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-part-modal\" data-index=\"" + (index == null ? "" : index) + "\">Salvar peça</button></div>");
   }
 
+  function waitRepairModal(id) {
+    var options = waitReasons.map(function (reason) { return "<option>" + escapeHtml(reason) + "</option>"; }).join("");
+    openModal("Reparo · dependência externa","Adicionar em espera","<p class=\"modal-copy\">Use Em espera somente quando o serviço depender de outra pessoa, setor ou material.</p><div class=\"form-stack\"><label>Motivo da espera<select id=\"wait-reason\">" + options + "</select></label><label>Observação<textarea id=\"wait-notes\" placeholder=\"Detalhe quem ou o que está sendo aguardado\"></textarea></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--warning\" type=\"button\" data-action=\"confirm-wait-repair\" data-id=\"" + id + "\">Mover para Em espera</button></div>");
+  }
+
+  function correctRepairTimeModal(id) {
+    var row = repairRows.find(function (item) { return item.id === Number(id); });
+    if (!row) return;
+    var seconds = repairElapsedSeconds(row);
+    openModal("Correção auditada","Corrigir cronômetro","<p class=\"modal-copy\">Informe o tempo correto e justifique a alteração. A justificativa ficará no registro da máquina.</p><div class=\"repair-time-grid\"><label>Horas<input id=\"correct-hours\" type=\"number\" min=\"0\" value=\"" + Math.floor(seconds / 3600) + "\"></label><label>Minutos<input id=\"correct-minutes\" type=\"number\" min=\"0\" max=\"59\" value=\"" + Math.floor((seconds % 3600) / 60) + "\"></label><label>Segundos<input id=\"correct-seconds\" type=\"number\" min=\"0\" max=\"59\" value=\"" + (seconds % 60) + "\"></label></div><div class=\"form-stack\"><label>Justificativa obrigatória<textarea id=\"correct-justification\" placeholder=\"Ex.: fui realizar outra atividade e esqueci o cronômetro rodando\"></textarea></label></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"save-repair-time\" data-id=\"" + id + "\">Salvar correção</button></div>");
+  }
+
   function profileModal() {
     if (backendState.configured && !backend.getSession()) {
       openModal("Acesso seguro","Entrar no PBA Flow","<p class=\"modal-copy\">Use o e-mail e a senha cadastrados pelo administrador. O perfil e as permissoes serao carregados automaticamente.</p><div class=\"form-stack\"><label>E-mail<input id=\"auth-email\" type=\"email\" autocomplete=\"username\" placeholder=\"nome@empresa.com.br\"></label><label>Senha<input id=\"auth-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Sua senha\"></label></div><div class=\"modal-actions\"><button class=\"button button--primary\" type=\"button\" data-action=\"sign-in\">Entrar</button></div>");
@@ -943,7 +1049,7 @@
       openModal("Sessao autenticada",activeProfile.display_name || state.user,"<div class=\"profile-session\"><span class=\"profile-session-avatar\">" + escapeHtml((activeProfile.display_name || state.user || "U").charAt(0).toUpperCase()) + "</span><div><strong>" + escapeHtml(activeProfile.email || "Usuario autenticado") + "</strong><small>" + escapeHtml(activeRole.name + " · " + activeRole.label) + "</small></div></div><p class=\"modal-copy\">Alteracoes sao identificadas por usuario e registradas na auditoria da operacao.</p><div class=\"modal-actions\"><button class=\"button button--danger\" type=\"button\" data-action=\"sign-out\">Sair desta conta</button><button class=\"button\" value=\"cancel\">Fechar</button></div>");
       return;
     }
-    openModal("Perfil local","Visualizar como","<p class=\"modal-copy\">A versão local abre direto no sistema. Use estes perfis apenas para conferir as permissões e telas.</p><div class=\"quick-grid\" style=\"padding:0\"><button data-action=\"switch-role\" data-role=\"technician\"><strong>Técnico</strong><small>Operação e indicadores resumidos</small></button><button data-action=\"switch-role\" data-role=\"manager\"><strong>Gestor</strong><small>Indicadores e gestão completa</small></button><button data-action=\"switch-role\" data-role=\"developer\"><strong>DEV</strong><small>API, canais e todas as telas</small></button></div>");
+    openModal("Acesso operacional","Modo técnico","<p class=\"modal-copy\">O técnico usa o sistema sem senha. Para entrar como Gestor ou DEV, configure o backend seguro e cadastre as contas administrativas; as senhas não ficam expostas no HTML.</p><div class=\"modal-actions\"><button class=\"button button--primary\" type=\"button\" data-action=\"technician-mode\">Continuar como técnico</button></div>");
   }
 
   function channelModal(bay, channel) {
@@ -999,6 +1105,12 @@
   }
 
   function handleAction(action, element) {
+    if (action === "technician-mode") {
+      state.role = "technician"; state.user = "Técnico";
+      localStorage.setItem("gpj-role",state.role); localStorage.setItem("gpj-user",state.user);
+      if ($("#modal").open) $("#modal").close(); state.view = "overview"; render();
+      return;
+    }
     if (action === "sign-in") {
       var authEmail = $("#auth-email").value.trim();
       var authPassword = $("#auth-password").value;
@@ -1048,13 +1160,13 @@
     if (action === "save-repair") {
       var editId = Number(element.dataset.id || 0);
       var existing = repairRows.find(function (row) { return row.id === editId; });
-      var data = { id: editId || Date.now(), op:$("#new-op").value.trim(), serial:$("#new-serial").value.trim(), issue:$("#new-problem").value, tech:$("#new-tech").value, priority:$("#new-priority").value, notes:$("#new-notes").value.trim(), elapsedSeconds:existing ? repairElapsedSeconds(existing) : 0, startedAt:existing && existing.status === "active" ? Date.now() : null, stage: existing ? existing.stage : 0, status: existing ? existing.status : "planned" };
+      var data = { id: editId || Date.now(), op:$("#new-op").value.trim(), serial:$("#new-serial").value.trim(), issue:$("#new-problem").value, tech:$("#new-tech").value, priority:$("#new-priority").value, notes:$("#new-notes").value.trim(), elapsedSeconds:existing ? repairElapsedSeconds(existing) : 0, startedAt:existing && existing.status === "active" && !existing.timerPaused ? Date.now() : null, timerPaused:existing ? Boolean(existing.timerPaused) : true, pauseReason:existing ? existing.pauseReason : "", waitingReason:existing ? existing.waitingReason : "", waitingNotes:existing ? existing.waitingNotes : "", timeCorrections:existing ? existing.timeCorrections : [], stage: existing ? existing.stage : 0, status: existing ? existing.status : "planned" };
       if (!data.op || !data.serial) { showToast("Informe a O.P. e o número de série."); return; }
       if (existing) repairRows[repairRows.indexOf(existing)] = data; else repairRows.unshift(data);
       saveOperations(); $("#modal").close(); state.repairTab = data.status; render(); showToast(existing ? "Reparo atualizado." : "Reparo adicionado aos planejados.");
     }
     if (action === "edit-repair") { var editRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (editRow) repairModal(editRow); }
-    if (action === "start-repair" || action === "resume-repair") { var startRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (startRow) { startRow.status = "active"; startRow.startedAt = Date.now(); saveOperations(); state.repairTab = "active"; render(); showToast("Reparo em andamento no nome de " + startRow.tech + "."); } }
+    if (action === "start-repair" || action === "resume-repair") { var startRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (startRow) { startRow.status = "active"; startRow.timerPaused = false; startRow.startedAt = Date.now(); startRow.waitingReason = ""; startRow.waitingNotes = ""; startRow.pauseReason = ""; saveOperations(); state.repairTab = "active"; render(); showToast("Reparo em andamento no nome de " + startRow.tech + "."); } }
     if (action === "advance-repair") {
       state.currentRepairId = Number(element.dataset.id);
       var advancing = repairRows.find(function (row) { return row.id === state.currentRepairId; });
@@ -1089,9 +1201,16 @@
     }
     if (action === "test-approved") { var approvedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (approvedRow) { approvedRow.elapsedSeconds = repairElapsedSeconds(approvedRow); approvedRow.startedAt = null; approvedRow.status = "history"; approvedRow.stage = 4; saveOperations(); } $("#modal").close(); state.repairTab = "history"; render(); showToast("Teste aprovado e reparo finalizado."); }
     if (action === "test-rejected") { var rejectedRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (rejectedRow) { rejectedRow.stage = 1; rejectedRow.notes = [rejectedRow.notes,"Teste reprovado: novo ciclo de peça"].filter(Boolean).join(" · "); saveOperations(); } acquisitionModal(); }
-    if (action === "pause-repair") { var pauseRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (pauseRow) { pauseRow.elapsedSeconds = repairElapsedSeconds(pauseRow); pauseRow.startedAt = null; pauseRow.status = "waiting"; saveOperations(); state.repairTab = "waiting"; render(); showToast("Atividade movida para Em espera. O cronômetro foi congelado."); } }
+    if (action === "pause-repair") { var pauseRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (pauseRow) { pauseRow.elapsedSeconds = repairElapsedSeconds(pauseRow); pauseRow.startedAt = null; pauseRow.timerPaused = true; pauseRow.pauseReason = "Pausado pelo técnico"; saveOperations(); state.repairTab = "active"; render(); showToast("Cronômetro pausado. A máquina continua no técnico responsável."); } }
+    if (action === "wait-repair") waitRepairModal(element.dataset.id);
+    if (action === "confirm-wait-repair") { var waitingRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); if (waitingRow) { waitingRow.elapsedSeconds = repairElapsedSeconds(waitingRow); waitingRow.startedAt = null; waitingRow.timerPaused = true; waitingRow.status = "waiting"; waitingRow.waitingReason = $("#wait-reason").value; waitingRow.waitingNotes = $("#wait-notes").value.trim(); saveOperations(); $("#modal").close(); state.repairTab = "waiting"; render(); showToast("Máquina movida para Em espera: " + waitingRow.waitingReason + "."); } }
+    if (action === "correct-repair-time") correctRepairTimeModal(element.dataset.id);
+    if (action === "save-repair-time") { var correctedRow = repairRows.find(function (row) { return row.id === Number(element.dataset.id); }); var correctionReason = $("#correct-justification").value.trim(); if (!correctionReason) { showToast("A justificativa é obrigatória."); return; } if (correctedRow) { var correctedSeconds = Math.max(0,Number($("#correct-hours").value || 0) * 3600 + Number($("#correct-minutes").value || 0) * 60 + Number($("#correct-seconds").value || 0)); correctedRow.elapsedSeconds = correctedSeconds; if (correctedRow.status === "active" && !correctedRow.timerPaused) correctedRow.startedAt = Date.now(); correctedRow.timeCorrections = correctedRow.timeCorrections || []; correctedRow.timeCorrections.push({at:new Date().toISOString(),by:state.user,seconds:correctedSeconds,justification:correctionReason}); correctedRow.notes = [correctedRow.notes,"Correção de tempo por " + state.user + ": " + correctionReason].filter(Boolean).join(" · "); saveOperations(); $("#modal").close(); render(); showToast("Cronômetro corrigido com justificativa registrada."); } }
     if (action === "add-problem") addProblemModal();
     if (action === "save-problem") { var problemName = $("#problem-name").value.trim(); if (!problemName) { showToast("Informe o nome do problema."); return; } if (problems.indexOf(problemName) < 0) problems.push(problemName); saveOperations(); $("#modal").close(); showToast("Problema cadastrado e disponível na lista."); }
+    if (action === "delete-problem") { problems.splice(Number(element.dataset.index),1); saveOperations(); render(); showToast("Problema removido do cadastro."); }
+    if (action === "delete-technician") { technicians.splice(Number(element.dataset.index),1); saveOperations(); render(); showToast("Técnico removido do cadastro."); }
+    if (action === "save-manager-settings") { state.repairAlertMinutes = Math.max(1,Number($("#repair-alert-minutes").value || 60)); state.repairCriticalMinutes = Math.max(state.repairAlertMinutes + 1,Number($("#repair-critical-minutes").value || 100)); $$('[data-op-priority]').forEach(function (select) { applyOpPriority(select.dataset.opPriority,select.value); }); localStorage.setItem("gpj-repair-alert-minutes",String(state.repairAlertMinutes)); localStorage.setItem("gpj-repair-critical-minutes",String(state.repairCriticalMinutes)); saveOperations(); render(); showToast("Prioridades e limites do Reparo salvos."); }
     if (action === "edit-registry") showToast("Edição aberta com auditoria de alterações.");
     if (action === "open-kvm-config") { if ($("#modal").open) $("#modal").close(); setView("kvm-config"); }
     if (action === "channel") { state.selectedChannel = channelKey(element.dataset.bay,element.dataset.channel); localStorage.setItem("gpj-selected-channel",state.selectedChannel); render(); channelDetailModal(); }
@@ -1193,6 +1312,8 @@
   });
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") closeDrawers();
+    if (event.key === "Enter" && event.target.id === "bios-op" && !$("#bios-serial").value.trim()) { event.preventDefault(); $("#bios-serial").focus(); }
+    if (event.key === "Escape" && event.target.id === "bios-serial") { event.target.value = ""; event.target.focus(); }
     if (event.key === "Enter" && $("#modal").open && $("#auth-password") && event.target.closest("#modal")) {
       event.preventDefault();
       var signInButton = $('[data-action="sign-in"]');
@@ -1200,11 +1321,58 @@
     }
   });
   document.addEventListener("change", function (event) {
+    if (event.target.id === "bios-destination") { var problemField = $(".bios-problem"); if (problemField) problemField.classList.toggle("is-hidden",event.target.value !== "repair"); return; }
     if (event.target.id !== "scan-bay" && event.target.id !== "scan-channel") return;
     var target = $("#scan-target");
     if (target) target.textContent = "Baia " + $("#scan-bay").value + " · Canal " + String($("#scan-channel").value).padStart(2,"0");
   });
   document.addEventListener("submit", function (event) {
+    if (event.target.id === "bios-form") {
+      event.preventDefault();
+      var biosOp = $("#bios-op").value.trim();
+      var biosSerial = $("#bios-serial").value.trim();
+      var biosDestination = $("#bios-destination").value;
+      var biosIssue = biosDestination === "repair" ? $("#bios-problem").value : "";
+      if (!biosOp || !biosSerial) { showToast("Bipe a O.P. e o número de série."); return; }
+      var biosPriority = opPriority(biosOp,"normal");
+      var biosMachine = machines.find(function (machine) { return machine.serial === biosSerial; });
+      if (!biosMachine) {
+        var opReference = machines.find(function (machine) { return machine.op === biosOp; });
+        biosMachine = {op:biosOp,serial:biosSerial,code:opReference ? opReference.code : "",expectedSystem:opReference ? opReference.expectedSystem : "Não informado",actualSystem:"",stage:"BIOS",sector:"Montagem",result:"",certificate:"Não iniciado",technician:"Sem técnico",priority:biosPriority === "high",priorityLevel:biosPriority,updated:""};
+        machines.push(biosMachine);
+      }
+      biosMachine.op = biosOp; biosMachine.priority = biosPriority === "high"; biosMachine.priorityLevel = biosPriority;
+      biosMachine.updated = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+      if (biosDestination === "repair") {
+        biosMachine.stage = "Fila Reparo";
+        if (!repairRows.some(function (row) { return row.serial === biosSerial && row.status !== "history"; })) repairRows.unshift({id:Date.now(),op:biosOp,serial:biosSerial,issue:biosIssue,notes:"Entrada registrada pela BIOS.",tech:"Sem técnico",priority:biosPriority,elapsedSeconds:0,startedAt:null,timerPaused:true,stage:0,status:"planned"});
+      } else {
+        biosMachine.stage = "Fila KVM";
+        if (!kvmQueue.some(function (row) { return row.serial === biosSerial; })) kvmQueue.push({op:biosOp,serial:biosSerial,origin:"BIOS",priority:biosPriority === "high",attempts:0,system:biosMachine.expectedSystem});
+      }
+      biosHistory.unshift({time:new Date().toLocaleString("pt-BR"),op:biosOp,serial:biosSerial,destination:biosDestination,issue:biosIssue});
+      if (biosHistory.length > 100) biosHistory.length = 100;
+      state.biosFixedOp = $("#bios-keep-op").checked ? biosOp : "";
+      localStorage.setItem("gpj-bios-fixed-op",state.biosFixedOp);
+      saveOperations(); render(); showToast("BIOS registrada. Máquina enviada para " + (biosDestination === "repair" ? "o planejamento do Reparo" : "a fila do KVM") + ".");
+      window.setTimeout(function () { var input = state.biosFixedOp ? $("#bios-serial") : $("#bios-op"); if (input) input.focus(); },0);
+      return;
+    }
+    if (event.target.id === "technician-form") {
+      event.preventDefault();
+      var technicianName = $("#technician-name").value.trim();
+      var technicianRegistration = $("#technician-registration").value.trim();
+      if (!technicianName || !technicianRegistration) { showToast("Informe nome e matrícula."); return; }
+      technicians.push({name:technicianName,registration:technicianRegistration,shift:$("#technician-shift").value.trim() || "T1",active:true});
+      saveOperations(); render(); showToast("Técnico cadastrado."); return;
+    }
+    if (event.target.id === "problem-form") {
+      event.preventDefault();
+      var registryProblem = $("#registry-problem-name").value.trim();
+      if (!registryProblem) return;
+      if (problems.indexOf(registryProblem) < 0) problems.push(registryProblem);
+      saveOperations(); render(); showToast("Problema cadastrado."); return;
+    }
     if (event.target.id === "part-form") {
       event.preventDefault();
       var partData = {code:$("#part-code").value.trim(),description:$("#part-description").value.trim()};
@@ -1218,13 +1386,15 @@
     var serialOp = $("#serial-op").value.trim();
     var serialCode = $("#serial-code").value.trim();
     var serialSystem = $("#serial-os").value;
+    var serialPriority = $("#serial-priority").value;
+    applyOpPriority(serialOp,serialPriority);
     var batchSerials = [];
     for (var offset = 0; offset < quantity; offset += 1) {
       var sv = serialValue(first + offset);
       batchSerials.push(sv);
-      machines.push({ op:serialOp, serial:sv, code:serialCode, expectedSystem:serialSystem, actualSystem:"", stage:"Vinculação", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Sem técnico", priority:false, updated:new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) });
+      machines.push({ op:serialOp, serial:sv, code:serialCode, expectedSystem:serialSystem, actualSystem:"", stage:"Vinculação", sector:"Montagem", result:"", certificate:"Não iniciado", technician:"Sem técnico", priority:serialPriority === "high", priorityLevel:serialPriority, updated:new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) });
     }
-    serialBatches.unshift({ createdAt:new Date().toLocaleString("pt-BR"), op:serialOp, code:serialCode, system:serialSystem, firstSerial:batchSerials[0], lastSerial:batchSerials[batchSerials.length-1], quantity:quantity, serials:batchSerials });
+    serialBatches.unshift({ createdAt:new Date().toLocaleString("pt-BR"), op:serialOp, code:serialCode, system:serialSystem, priority:serialPriority, firstSerial:batchSerials[0], lastSerial:batchSerials[batchSerials.length-1], quantity:quantity, serials:batchSerials });
     state.lastSerial += quantity;
     localStorage.setItem("gpj-last-serial",String(state.lastSerial));
     saveOperations();
@@ -1241,8 +1411,39 @@
     kvmSessions = [];
     kvmQueue = [];
     serialBatches = [];
+  } else if (state.role !== "technician") {
+    state.role = "technician";
+    state.user = "Técnico";
+    localStorage.setItem("gpj-role",state.role);
+    localStorage.setItem("gpj-user",state.user);
   }
+
+  function renderBios() {
+    var recent = biosHistory.slice(0,12).map(function (item) {
+      return "<tr><td class=\"mono\">" + escapeHtml(item.time) + "</td><td class=\"mono\">" + escapeHtml(item.op) + "</td><td class=\"mono\">" + escapeHtml(item.serial) + "</td><td>" + pill(item.destination === "repair" ? "Reparo" : "KVM",item.destination === "repair" ? "amber" : "green") + "</td><td>" + escapeHtml(item.issue || "Aprovada na BIOS") + "</td></tr>";
+    }).join("") || "<tr><td colspan=\"5\" class=\"empty-table\">Nenhuma máquina registrada na BIOS neste navegador.</td></tr>";
+    var problemOptions = problems.map(function (problem) { return "<option>" + escapeHtml(problem) + "</option>"; }).join("");
+    return "<div class=\"page-stack bios-page\">" + pageHead("Posto da linha","BIOS · triagem rápida","Bipe ou digite sem usar o mouse. Depois do registro, o foco volta automaticamente para o próximo serial.","") +
+      "<section class=\"panel panel-pad bios-console\"><div class=\"bios-console-head\"><div><span class=\"eyebrow\">Leitura contínua</span><h2>Registrar passagem na BIOS</h2><p>Fixe a O.P. quando estiver conferindo várias máquinas do mesmo lote.</p></div>" + pill("Enter confirma","green") + "</div><form id=\"bios-form\" class=\"bios-form\"><label class=\"field\">O.P.<input id=\"bios-op\" value=\"" + escapeHtml(state.biosFixedOp) + "\" placeholder=\"Bipe ou digite a O.P.\" autocomplete=\"off\"></label><label class=\"field bios-serial-field\">Número de série<input id=\"bios-serial\" placeholder=\"Bipe o serial e pressione Enter\" autocomplete=\"off\"></label><label class=\"field\">Destino<select id=\"bios-destination\"><option value=\"kvm\">Aprovada → Fila do KVM</option><option value=\"repair\">Problema → Planejamento do Reparo</option></select></label><label class=\"field bios-problem\">Problema<select id=\"bios-problem\">" + problemOptions + "</select></label><label class=\"check-field\"><input id=\"bios-keep-op\" type=\"checkbox\" " + (state.biosFixedOp ? "checked" : "") + "><span>Manter esta O.P. para as próximas leituras</span></label><button class=\"button button--primary bios-submit\" type=\"submit\">Registrar e preparar próxima</button></form><div class=\"bios-shortcuts\"><span><kbd>Enter</kbd> registra</span><span><kbd>Tab</kbd> muda o campo</span><span><kbd>Esc</kbd> limpa o serial</span></div></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Últimas leituras</span><h2>Passagens registradas na BIOS</h2></div>" + pill(biosHistory.length + " registros","blue") + "</div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Hora</th><th>O.P.</th><th>Serial</th><th>Destino</th><th>Resultado</th></tr></thead><tbody>" + recent + "</tbody></table></div></section></div>";
+  }
+
+  function renderManagerSettings() {
+    if (state.role !== "manager") return "<div class=\"page-stack\"><section class=\"panel role-lock\"><h1>Área exclusiva do gestor</h1></section></div>";
+    var ops = {};
+    machines.forEach(function (machine) { ops[machine.op] = (ops[machine.op] || 0) + 1; });
+    repairRows.forEach(function (repair) { if (!ops[repair.op]) ops[repair.op] = 0; });
+    var rows = Object.keys(ops).sort().map(function (op) {
+      var priority = opPriority(op,"normal");
+      return "<tr><td class=\"mono\"><strong>" + escapeHtml(op) + "</strong></td><td>" + ops[op] + "</td><td><select class=\"compact-select\" data-op-priority=\"" + escapeHtml(op) + "\"><option value=\"normal\"" + (priority === "normal" ? " selected" : "") + ">Normal</option><option value=\"high\"" + (priority === "high" ? " selected" : "") + ">Alta</option><option value=\"low\"" + (priority === "low" ? " selected" : "") + ">Baixa</option></select></td><td>" + pill(priority === "high" ? "Prioridade alta" : priority === "low" ? "Prioridade baixa" : "Fluxo normal",priority === "high" ? "red" : priority === "low" ? "blue" : "green") + "</td></tr>";
+    }).join("") || "<tr><td colspan=\"4\" class=\"empty-table\">Nenhuma O.P. disponível para configuração.</td></tr>";
+    return "<div class=\"page-stack\">" + pageHead("Gestão da produção","O.P.s e comportamento do Reparo","Defina prioridades da linha e os tempos que alimentam os alertas do Carcará.","<button class=\"button button--primary\" data-action=\"save-manager-settings\">Salvar configurações</button>") +
+      "<section class=\"balanced-grid\"><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Reparo</span><h2>Limites de tempo</h2></div></div><div class=\"form-stack\"><label>Entrar em alerta após (minutos)<input id=\"repair-alert-minutes\" type=\"number\" min=\"1\" value=\"" + state.repairAlertMinutes + "\"></label><label>Entrar em crítico após (minutos)<input id=\"repair-critical-minutes\" type=\"number\" min=\"2\" value=\"" + state.repairCriticalMinutes + "\"></label><div class=\"validation-note\"><strong>Padrão solicitado</strong><span>Alerta em 1 hora e crítico em 1h40. Os cartões mudam de estado automaticamente.</span></div></div></div><div class=\"panel panel-pad\"><div class=\"panel-head compact\"><div><span>Fim de turno</span><h2>Pausa automática · 18:05</h2></div></div><p class=\"modal-copy\">Todos os cronômetros ativos do Reparo são congelados automaticamente às 18:05. O cartão continua no técnico responsável e pode ser retomado no próximo turno.</p>" + pill("Ativo","green") + "</div></section>" +
+      "<section class=\"panel\"><div class=\"panel-head\"><div><span>Ordens em circulação</span><h2>Prioridade por O.P.</h2></div><button class=\"button button--primary\" data-action=\"save-manager-settings\">Aplicar prioridades</button></div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>O.P.</th><th>Máquinas</th><th>Prioridade</th><th>Comportamento</th></tr></thead><tbody>" + rows + "</tbody></table></div></section></div>";
+  }
+  autoPauseRepairShift();
   render();
   initializeBackend();
   window.setInterval(updateKvmTimers,1000);
+  window.setInterval(autoPauseRepairShift,30000);
 })();

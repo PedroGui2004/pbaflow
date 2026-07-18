@@ -365,3 +365,25 @@ dialog.modal.modal--wide[open]{max-width:calc(100vw - 34px)}
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Fluxo BIOS, reparos por técnico e cadastros unificados */
+.bios-console{border-top:4px solid var(--orange)}
+.bios-console-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:20px}
+.bios-console-head h2{margin:5px 0 6px;font-size:24px}.bios-console-head p{margin:0;color:var(--muted)}
+.bios-form{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(240px,1.2fr) minmax(220px,1fr) minmax(220px,1fr);gap:14px;align-items:end}
+.bios-serial-field input{font-family:var(--mono);font-size:18px;font-weight:800;letter-spacing:.04em}
+.bios-submit{min-height:46px}.check-field{display:flex;align-items:center;gap:9px;min-height:46px;color:var(--text);font-weight:700}.check-field input{width:18px;height:18px}
+.bios-shortcuts{display:flex;gap:20px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.bios-shortcuts kbd{padding:3px 7px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);font-family:var(--mono)}
+.is-hidden{display:none!important}
+.technician-repair-group{display:grid;gap:12px;margin-bottom:20px}.technician-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:12px;background:var(--navy);color:#fff}.technician-group-head span:first-child{display:grid;gap:2px}.technician-group-head small{color:rgba(255,255,255,.72)}
+.repair-card.timer-running{border-color:rgba(42,166,111,.55);box-shadow:0 0 0 1px rgba(42,166,111,.12),var(--shadow)}
+.repair-card.timer-running .live-repair-clock{color:var(--green)}.repair-card.timer-running .repair-clock-block:before{content:"";display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px rgba(42,166,111,.12);animation:repairPulse 1.6s infinite}
+.repair-card.timer-paused{opacity:.88}.repair-card.timer-paused .live-repair-clock{color:var(--amber)}
+.repair-card.time-alert{border-color:var(--amber)}.repair-card.time-critical{border-color:var(--red);box-shadow:0 0 0 1px rgba(216,91,82,.18),var(--shadow)}
+.repair-wait-reason{margin:12px 0;padding:11px 13px;border-left:4px solid var(--amber);border-radius:8px;background:rgba(230,161,42,.1);color:var(--text)}
+.repair-time-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}.repair-time-grid label{display:grid;gap:6px;font-weight:700}.repair-time-grid input{width:100%}
+.registry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.registry-list{display:grid;gap:7px;max-height:320px;margin:16px 0 0;padding:0;overflow:auto;list-style:none}.registry-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.compact-select{min-width:130px}.button--warning{border-color:var(--amber);background:rgba(230,161,42,.1);color:var(--amber)}
+@keyframes repairPulse{50%{opacity:.45;transform:scale(.82)}}
+@media(max-width:1100px){.bios-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.bios-form,.registry-grid,.repair-time-grid{grid-template-columns:1fr}.bios-console-head{align-items:flex-start;flex-direction:column}.bios-shortcuts{flex-wrap:wrap}.technician-group-head{align-items:flex-start;flex-direction:column}}
