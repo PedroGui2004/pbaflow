@@ -326,7 +326,7 @@
     $("#profile-initial").textContent = (state.user || profile.name).charAt(0).toUpperCase();
     $("#sidebar-user").textContent = profile.name + " · " + profile.label;
     $("#sidebar-sector").textContent = sectorLabels[state.sector];
-    $("#breadcrumb").textContent = "GPJ / " + sectorLabels[state.sector];
+    $("#breadcrumb").textContent = "PBA / " + sectorLabels[state.sector];
     $("#notification-count").textContent = String(getNotifications().length);
     $$("[data-sector]").forEach(function (button) { button.classList.toggle("active", button.dataset.sector === state.sector); });
     document.documentElement.dataset.theme = state.theme;
@@ -728,7 +728,7 @@
     updateChrome();
     var renderers = { overview: renderOverview, repairs: renderRepairs, kvm: renderKvm, "kvm-config": renderKvmConfig, parts: renderParts, linkage: renderLinkage, burnin: renderBurnin, trace: renderTrace, indicators: renderIndicators, registry: renderRegistry, integration: renderIntegration };
     var pageNames = { overview:"Visão geral",repairs:"Reparos",kvm:"KVM · Run-in","kvm-config":"Configuração de canais",parts:"Peças",linkage:"Vinculação",burnin:"BurnIn",trace:"Rastreabilidade",indicators:"Indicadores",registry:"Cadastros",integration:"Integração API" };
-    $("#page-title").textContent = pageNames[state.view] || "GPJ Flow";
+    $("#page-title").textContent = pageNames[state.view] || "PBA Flow";
     $("#content").innerHTML = (renderers[state.view] || renderOverview)();
     updateKvmTimers();
   }
