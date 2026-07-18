@@ -319,3 +319,49 @@ html[data-theme="dark"],html[data-theme="black"]{--green-soft:#0d3529;--red-soft
    backdrop-filter em .topbar, etc.) e garantindo comportamento consistente. */
 dialog.modal[open]{position:fixed;top:0;left:0;right:0;bottom:0;inset:0;margin:auto;width:fit-content;height:fit-content;max-width:calc(100vw - 28px);max-height:calc(100vh - 28px)}
 dialog.modal.modal--wide[open]{max-width:calc(100vw - 34px)}
+.plant-online[data-status="connecting"] i,
+.plant-online[data-status="signed-out"] i {
+  background: #e6a12a;
+  box-shadow: 0 0 0 5px rgba(230, 161, 42, .12);
+}
+
+.plant-online[data-status="error"] i,
+.plant-online[data-status="local"] i {
+  background: #d85b52;
+  box-shadow: 0 0 0 5px rgba(216, 91, 82, .12);
+}
+
+.profile-session {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-muted, rgba(23, 58, 94, .06));
+}
+
+.profile-session-avatar {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  border-radius: 13px;
+  background: var(--navy, #173a5e);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.profile-session div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profile-session strong,
+.profile-session small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
