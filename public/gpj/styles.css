@@ -313,3 +313,9 @@ html[data-theme="dark"],html[data-theme="black"]{--green-soft:#0d3529;--red-soft
   .modal-actions--split{grid-template-columns:1fr}
   .modal-actions--split>span{display:none}
 }
+
+/* Modal centering — força centralização do <dialog> em qualquer resolução,
+   anulando qualquer containing block criado por ancestrais (transform/filter/
+   backdrop-filter em .topbar, etc.) e garantindo comportamento consistente. */
+dialog.modal[open]{position:fixed;top:0;left:0;right:0;bottom:0;inset:0;margin:auto;width:fit-content;height:fit-content;max-width:calc(100vw - 28px);max-height:calc(100vh - 28px)}
+dialog.modal.modal--wide[open]{max-width:calc(100vw - 34px)}
