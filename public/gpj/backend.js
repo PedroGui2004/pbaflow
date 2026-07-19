@@ -443,7 +443,7 @@
   }
 
   function syncSnapshot(snapshot) {
-    if (!configured() || !session) return;
+    if (!configured()) return;
     pendingSnapshot = snapshot;
     window.clearTimeout(syncTimer);
     syncTimer = window.setTimeout(async function drain() {
