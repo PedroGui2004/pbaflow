@@ -345,8 +345,7 @@
   }
 
   async function fetchSnapshot() {
-    if (!session) throw new Error("Entre com seu usuario para acessar a operacao.");
-    if (!profile) await fetchProfile();
+    if (session && !profile) await fetchProfile();
     var values = await Promise.all([
       restTable("machines", "select=*&order=created_at.asc"),
       restTable("repairs", "select=*&order=created_at.asc"),
