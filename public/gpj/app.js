@@ -1087,7 +1087,22 @@
 
   function acquisitionModal() {
     var options = parts.map(function (part) { return "<option value=\"" + escapeHtml(part.code) + "\">" + escapeHtml(part.code + " — " + part.description) + "</option>"; }).join("");
-    openModal("Aquisição de peça","Selecionar peça","<div class=\"form-stack\"><label>Peça cadastrada<select id=\"repair-part\">" + options + "</select></label><label>Observação<textarea id=\"repair-part-notes\" placeholder=\"Motivo da troca ou detalhe da aquisição\"></textarea></label><button class=\"inline-link\" type=\"button\" data-action=\"open-parts\">+ A peça não existe? Cadastrar agora</button></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"confirm-part\">Iniciar aquisição</button></div>");
+    openModal("Aquisição de peça","Selecionar peça",
+      "<div class=\"form-stack\">" +
+        "<label>Peça cadastrada<select id=\"repair-part\">" + options + "</select></label>" +
+        "<label>Observação<textarea id=\"repair-part-notes\" placeholder=\"Motivo da troca ou detalhe da aquisição\"></textarea></label>" +
+        "<button class=\"inline-link\" type=\"button\" data-action=\"toggle-inline-part\">+ A peça não existe? Cadastrar agora</button>" +
+        "<div id=\"inline-part-form\" class=\"form-stack\" style=\"display:none;border:1px dashed var(--border);border-radius:12px;padding:12px;margin-top:6px;background:var(--surface-soft)\">" +
+          "<strong style=\"font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em\">Nova peça</strong>" +
+          "<label>Código<input id=\"inline-part-code\" placeholder=\"Ex.: MB-B650-A\"></label>" +
+          "<label>Descrição<input id=\"inline-part-desc\" placeholder=\"Ex.: Placa-mãe B650 ATX\"></label>" +
+          "<div class=\"modal-actions\" style=\"padding:0;margin-top:4px\">" +
+            "<button class=\"button\" type=\"button\" data-action=\"toggle-inline-part\">Cancelar</button>" +
+            "<button class=\"button button--primary\" type=\"button\" data-action=\"save-inline-part\">Cadastrar peça</button>" +
+          "</div>" +
+        "</div>" +
+      "</div>" +
+      "<div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"confirm-part\">Iniciar aquisição</button></div>");
   }
 
   function kvmRejectionModal(session) {
