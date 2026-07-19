@@ -211,12 +211,6 @@
 
   async function initializeBackend() {
     if (!backendState.configured) return;
-    if (!backend.getSession()) {
-      backendState.status = "signed-out";
-      updateChrome();
-      window.setTimeout(profileModal, 80);
-      return;
-    }
     backendState.status = "connecting";
     updateChrome();
     await reloadRemoteSnapshot(true);
@@ -1093,7 +1087,22 @@
 
   function acquisitionModal() {
     var options = parts.map(function (part) { return "<option value=\"" + escapeHtml(part.code) + "\">" + escapeHtml(part.code + " — " + part.description) + "</option>"; }).join("");
-    openModal("Aquisição de peça","Selecionar peça","<div class=\"form-stack\"><label>Peça cadastrada<select id=\"repair-part\">" + options + "</select></label><label>Observação<textarea id=\"repair-part-notes\" placeholder=\"Motivo da troca ou detalhe da aquisição\"></textarea></label><button class=\"inline-link\" type=\"button\" data-action=\"open-parts\">+ A peça não existe? Cadastrar agora</button></div><div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"confirm-part\">Iniciar aquisição</button></div>");
+    openModal("Aquisição de peça","Selecionar peça",
+      "<div class=\"form-stack\">" +
+        "<label>Peça cadastrada<select id=\"repair-part\">" + options + "</select></label>" +
+        "<label>Observação<textarea id=\"repair-part-notes\" placeholder=\"Motivo da troca ou detalhe da aquisição\"></textarea></label>" +
+        "<button class=\"inline-link\" type=\"button\" data-action=\"toggle-inline-part\">+ A peça não existe? Cadastrar agora</button>" +
+        "<div id=\"inline-part-form\" class=\"form-stack\" style=\"display:none;border:1px dashed var(--border);border-radius:12px;padding:12px;margin-top:6px;background:var(--surface-soft)\">" +
+          "<strong style=\"font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em\">Nova peça</strong>" +
+          "<label>Código<input id=\"inline-part-code\" placeholder=\"Ex.: MB-B650-A\"></label>" +
+          "<label>Descrição<input id=\"inline-part-desc\" placeholder=\"Ex.: Placa-mãe B650 ATX\"></label>" +
+          "<div class=\"modal-actions\" style=\"padding:0;margin-top:4px\">" +
+            "<button class=\"button\" type=\"button\" data-action=\"toggle-inline-part\">Cancelar</button>" +
+            "<button class=\"button button--primary\" type=\"button\" data-action=\"save-inline-part\">Cadastrar peça</button>" +
+          "</div>" +
+        "</div>" +
+      "</div>" +
+      "<div class=\"modal-actions\"><button class=\"button\" value=\"cancel\">Cancelar</button><button class=\"button button--primary\" type=\"button\" data-action=\"confirm-part\">Iniciar aquisição</button></div>");
   }
 
   function kvmRejectionModal(session) {
@@ -1177,6 +1186,28 @@
     if (action === "needs-part") acquisitionModal();
     if (action === "confirm-part") { var partRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (partRow) { partRow.stage = 1; partRow.partCode = $("#repair-part").value; partRow.notes = [partRow.notes,$("#repair-part-notes").value.trim()].filter(Boolean).join(" · "); saveOperations(); } $("#modal").close(); render(); showToast("Aquisição iniciada com a peça selecionada."); }
     if (action === "open-parts") { $("#modal").close(); setView("parts"); }
+    if (action === "toggle-inline-part") {
+      var inline = $("#inline-part-form");
+      if (inline) inline.style.display = inline.style.display === "none" ? "flex" : "none";
+      if (inline && inline.style.display !== "none") { var codeInput = $("#inline-part-code"); if (codeInput) codeInput.focus(); }
+    }
+    if (action === "save-inline-part") {
+      var newCode = ($("#inline-part-code").value || "").trim();
+      var newDesc = ($("#inline-part-desc").value || "").trim();
+      if (!newCode || !newDesc) { showToast("Informe código e descrição da peça."); return; }
+      if (parts.some(function (p) { return p.code === newCode; })) { showToast("Já existe uma peça com esse código."); return; }
+      parts.push({ code: newCode, description: newDesc });
+      saveOperations();
+      var select = $("#repair-part");
+      if (select) {
+        var opt = document.createElement("option");
+        opt.value = newCode; opt.textContent = newCode + " — " + newDesc;
+        select.appendChild(opt); select.value = newCode;
+      }
+      var inlineForm = $("#inline-part-form");
+      if (inlineForm) inlineForm.style.display = "none";
+      showToast("Peça cadastrada e selecionada.");
+    }
     if (action === "no-part") { solutionModal(); }
     if (action === "add-solution") addSolutionModal();
     if (action === "save-solution") { var solutionName = $("#solution-name").value.trim(); if (!solutionName) { showToast("Informe o nome da solução."); return; } if (solutions.indexOf(solutionName) < 0) solutions.push(solutionName); saveOperations(); $("#modal").close(); solutionModal(); var sel = $("#repair-solution"); if (sel) sel.value = solutionName; showToast("Solução cadastrada e disponível na lista."); }
@@ -1280,9 +1311,7 @@
   $("#notification-button").addEventListener("click", function () { openDrawer("notification-drawer"); });
   $("#mobile-add").addEventListener("click", function () { openDrawer("quick-drawer"); });
   $("#profile-button").addEventListener("click", profileModal);
-  $("#modal").addEventListener("close", function () {
-    if (backendState.configured && !backend.getSession()) window.setTimeout(profileModal, 0);
-  });
+  $("#modal").addEventListener("close", function () {});
   window.addEventListener("gpj:sync", function (event) {
     backendState.status = event.detail && event.detail.status === "online" ? "online" : "error";
     updateChrome();

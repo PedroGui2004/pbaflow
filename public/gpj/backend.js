@@ -345,8 +345,7 @@
   }
 
   async function fetchSnapshot() {
-    if (!session) throw new Error("Entre com seu usuario para acessar a operacao.");
-    if (!profile) await fetchProfile();
+    if (session && !profile) await fetchProfile();
     var values = await Promise.all([
       restTable("machines", "select=*&order=created_at.asc"),
       restTable("repairs", "select=*&order=created_at.asc"),
@@ -444,7 +443,7 @@
   }
 
   function syncSnapshot(snapshot) {
-    if (!configured() || !session) return;
+    if (!configured()) return;
     pendingSnapshot = snapshot;
     window.clearTimeout(syncTimer);
     syncTimer = window.setTimeout(async function drain() {
@@ -476,7 +475,7 @@
       queue: ["kvm_queue", "legacy_key", "queue:" + legacyKey]
     };
     var target = configByKind[kind];
-    if (!target || !session) return;
+    if (!target) return;
     await request("/rest/v1/" + target[0] + "?" + target[1] + "=eq." + encodeURIComponent(target[2]), { method: "DELETE" });
   }
 
@@ -489,7 +488,7 @@
 
   function subscribe(onChange) {
     disconnectRealtime();
-    if (!configured() || !session || !window.WebSocket) return function () {};
+    if (!configured() || !window.WebSocket) return function () {};
     var wsUrl = baseUrl.replace(/^http/, "ws") + "/realtime/v1/websocket?apikey=" + encodeURIComponent(anonKey) + "&vsn=1.0.0";
     var socket = new WebSocket(wsUrl);
     realtimeSocket = socket;
@@ -505,7 +504,7 @@
               presence: { enabled: false },
               postgres_changes: [{ event: "*", schema: "public", table: table }]
             },
-            access_token: session.access_token
+            access_token: (session && session.access_token) || anonKey
           },
           ref: String(index + 1),
           join_ref: String(index + 1)
