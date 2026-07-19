@@ -211,12 +211,6 @@
 
   async function initializeBackend() {
     if (!backendState.configured) return;
-    if (!backend.getSession()) {
-      backendState.status = "signed-out";
-      updateChrome();
-      window.setTimeout(profileModal, 80);
-      return;
-    }
     backendState.status = "connecting";
     updateChrome();
     await reloadRemoteSnapshot(true);
