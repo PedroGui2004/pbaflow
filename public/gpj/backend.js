@@ -475,7 +475,7 @@
       queue: ["kvm_queue", "legacy_key", "queue:" + legacyKey]
     };
     var target = configByKind[kind];
-    if (!target || !session) return;
+    if (!target) return;
     await request("/rest/v1/" + target[0] + "?" + target[1] + "=eq." + encodeURIComponent(target[2]), { method: "DELETE" });
   }
 
