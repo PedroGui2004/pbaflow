@@ -1186,6 +1186,28 @@
     if (action === "needs-part") acquisitionModal();
     if (action === "confirm-part") { var partRow = repairRows.find(function (row) { return row.id === state.currentRepairId; }); if (partRow) { partRow.stage = 1; partRow.partCode = $("#repair-part").value; partRow.notes = [partRow.notes,$("#repair-part-notes").value.trim()].filter(Boolean).join(" · "); saveOperations(); } $("#modal").close(); render(); showToast("Aquisição iniciada com a peça selecionada."); }
     if (action === "open-parts") { $("#modal").close(); setView("parts"); }
+    if (action === "toggle-inline-part") {
+      var inline = $("#inline-part-form");
+      if (inline) inline.style.display = inline.style.display === "none" ? "flex" : "none";
+      if (inline && inline.style.display !== "none") { var codeInput = $("#inline-part-code"); if (codeInput) codeInput.focus(); }
+    }
+    if (action === "save-inline-part") {
+      var newCode = ($("#inline-part-code").value || "").trim();
+      var newDesc = ($("#inline-part-desc").value || "").trim();
+      if (!newCode || !newDesc) { showToast("Informe código e descrição da peça."); return; }
+      if (parts.some(function (p) { return p.code === newCode; })) { showToast("Já existe uma peça com esse código."); return; }
+      parts.push({ code: newCode, description: newDesc });
+      saveOperations();
+      var select = $("#repair-part");
+      if (select) {
+        var opt = document.createElement("option");
+        opt.value = newCode; opt.textContent = newCode + " — " + newDesc;
+        select.appendChild(opt); select.value = newCode;
+      }
+      var inlineForm = $("#inline-part-form");
+      if (inlineForm) inlineForm.style.display = "none";
+      showToast("Peça cadastrada e selecionada.");
+    }
     if (action === "no-part") { solutionModal(); }
     if (action === "add-solution") addSolutionModal();
     if (action === "save-solution") { var solutionName = $("#solution-name").value.trim(); if (!solutionName) { showToast("Informe o nome da solução."); return; } if (solutions.indexOf(solutionName) < 0) solutions.push(solutionName); saveOperations(); $("#modal").close(); solutionModal(); var sel = $("#repair-solution"); if (sel) sel.value = solutionName; showToast("Solução cadastrada e disponível na lista."); }
