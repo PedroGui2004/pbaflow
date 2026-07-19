@@ -1274,9 +1274,7 @@
   $("#notification-button").addEventListener("click", function () { openDrawer("notification-drawer"); });
   $("#mobile-add").addEventListener("click", function () { openDrawer("quick-drawer"); });
   $("#profile-button").addEventListener("click", profileModal);
-  $("#modal").addEventListener("close", function () {
-    if (backendState.configured && !backend.getSession()) window.setTimeout(profileModal, 0);
-  });
+  $("#modal").addEventListener("close", function () {});
   window.addEventListener("gpj:sync", function (event) {
     backendState.status = event.detail && event.detail.status === "online" ? "online" : "error";
     updateChrome();
