@@ -14,13 +14,590 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      alerts: {
+        Row: {
+          alert_type: string
+          created_at: string
+          created_by: string | null
+          id: string
+          legacy_key: string
+          machine_id: string | null
+          message: string
+          module: string
+          resolved: boolean
+          resolved_at: string | null
+          severity: string
+          title: string
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          legacy_key: string
+          machine_id?: string | null
+          message: string
+          module: string
+          resolved?: boolean
+          resolved_at?: string | null
+          severity?: string
+          title: string
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          legacy_key?: string
+          machine_id?: string | null
+          message?: string
+          module?: string
+          resolved?: boolean
+          resolved_at?: string | null
+          severity?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alerts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alerts_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "machines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      catalog_items: {
+        Row: {
+          active: boolean
+          code: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          item_type: string
+          legacy_key: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          item_type: string
+          legacy_key: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          item_type?: string
+          legacy_key?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catalog_items_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kvm_channels: {
+        Row: {
+          active: boolean
+          bay: number
+          channel: number
+          connection_type: string
+          id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          active?: boolean
+          bay: number
+          channel: number
+          connection_type?: string
+          id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          active?: boolean
+          bay?: number
+          channel?: number
+          connection_type?: string
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kvm_channels_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kvm_queue: {
+        Row: {
+          attempts: number
+          created_at: string
+          id: string
+          legacy_key: string
+          machine_id: string | null
+          op: string
+          operating_system: string | null
+          origin: string
+          priority: string
+          serial: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          id?: string
+          legacy_key: string
+          machine_id?: string | null
+          op: string
+          operating_system?: string | null
+          origin?: string
+          priority?: string
+          serial: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          id?: string
+          legacy_key?: string
+          machine_id?: string | null
+          op?: string
+          operating_system?: string | null
+          origin?: string
+          priority?: string
+          serial?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kvm_queue_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "machines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kvm_sessions: {
+        Row: {
+          channel_id: string
+          connection_type: string | null
+          created_at: string
+          elapsed_seconds: number
+          failures: number
+          finished_at: string | null
+          id: string
+          legacy_key: string
+          machine_id: string | null
+          metadata: Json
+          op: string
+          operating_system: string | null
+          paused_by_global: boolean
+          serial: string
+          started_at: string | null
+          status: string
+          technician_id: string | null
+          technician_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          channel_id: string
+          connection_type?: string | null
+          created_at?: string
+          elapsed_seconds?: number
+          failures?: number
+          finished_at?: string | null
+          id?: string
+          legacy_key: string
+          machine_id?: string | null
+          metadata?: Json
+          op: string
+          operating_system?: string | null
+          paused_by_global?: boolean
+          serial: string
+          started_at?: string | null
+          status?: string
+          technician_id?: string | null
+          technician_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          channel_id?: string
+          connection_type?: string | null
+          created_at?: string
+          elapsed_seconds?: number
+          failures?: number
+          finished_at?: string | null
+          id?: string
+          legacy_key?: string
+          machine_id?: string | null
+          metadata?: Json
+          op?: string
+          operating_system?: string | null
+          paused_by_global?: boolean
+          serial?: string
+          started_at?: string | null
+          status?: string
+          technician_id?: string | null
+          technician_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kvm_sessions_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "kvm_channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kvm_sessions_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "machines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kvm_sessions_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      machines: {
+        Row: {
+          actual_os: string | null
+          certificate_status: string
+          created_at: string
+          equipment_code: string | null
+          expected_os: string | null
+          id: string
+          metadata: Json
+          op: string
+          priority: string
+          result: string | null
+          sector: string
+          serial: string
+          stage: string
+          technician_id: string | null
+          technician_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          actual_os?: string | null
+          certificate_status?: string
+          created_at?: string
+          equipment_code?: string | null
+          expected_os?: string | null
+          id?: string
+          metadata?: Json
+          op: string
+          priority?: string
+          result?: string | null
+          sector?: string
+          serial: string
+          stage?: string
+          technician_id?: string | null
+          technician_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          actual_os?: string | null
+          certificate_status?: string
+          created_at?: string
+          equipment_code?: string | null
+          expected_os?: string | null
+          id?: string
+          metadata?: Json
+          op?: string
+          priority?: string
+          result?: string | null
+          sector?: string
+          serial?: string
+          stage?: string
+          technician_id?: string | null
+          technician_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "machines_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          active: boolean
+          created_at: string
+          display_name: string
+          email: string
+          id: string
+          role: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          display_name?: string
+          email: string
+          id: string
+          role?: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          display_name?: string
+          email?: string
+          id?: string
+          role?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      repair_events: {
+        Row: {
+          cycle_number: number
+          event_type: string
+          id: string
+          machine_id: string | null
+          notes: string | null
+          occurred_at: string
+          payload: Json
+          repair_id: string
+          stage: number | null
+          technician_id: string | null
+        }
+        Insert: {
+          cycle_number?: number
+          event_type: string
+          id?: string
+          machine_id?: string | null
+          notes?: string | null
+          occurred_at?: string
+          payload?: Json
+          repair_id: string
+          stage?: number | null
+          technician_id?: string | null
+        }
+        Update: {
+          cycle_number?: number
+          event_type?: string
+          id?: string
+          machine_id?: string | null
+          notes?: string | null
+          occurred_at?: string
+          payload?: Json
+          repair_id?: string
+          stage?: number | null
+          technician_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repair_events_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "machines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repair_events_repair_id_fkey"
+            columns: ["repair_id"]
+            isOneToOne: false
+            referencedRelation: "repairs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repair_events_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      repairs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          current_stage: number
+          elapsed_seconds: number
+          id: string
+          legacy_key: string
+          machine_id: string | null
+          notes: string | null
+          op: string
+          part_code: string | null
+          priority: string
+          problem: string
+          serial: string
+          solution: string | null
+          started_at: string | null
+          status: string
+          technician_id: string | null
+          technician_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_stage?: number
+          elapsed_seconds?: number
+          id?: string
+          legacy_key: string
+          machine_id?: string | null
+          notes?: string | null
+          op: string
+          part_code?: string | null
+          priority?: string
+          problem: string
+          serial: string
+          solution?: string | null
+          started_at?: string | null
+          status?: string
+          technician_id?: string | null
+          technician_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_stage?: number
+          elapsed_seconds?: number
+          id?: string
+          legacy_key?: string
+          machine_id?: string | null
+          notes?: string | null
+          op?: string
+          part_code?: string | null
+          priority?: string
+          problem?: string
+          serial?: string
+          solution?: string | null
+          started_at?: string | null
+          status?: string
+          technician_id?: string | null
+          technician_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repairs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repairs_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "machines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repairs_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      serial_batches: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          equipment_code: string | null
+          first_serial: string
+          id: string
+          last_serial: string
+          legacy_key: string
+          op: string
+          operating_system: string | null
+          quantity: number
+          serials: Json
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          equipment_code?: string | null
+          first_serial: string
+          id?: string
+          last_serial: string
+          legacy_key: string
+          op: string
+          operating_system?: string | null
+          quantity: number
+          serials?: Json
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          equipment_code?: string | null
+          first_serial?: string
+          id?: string
+          last_serial?: string
+          legacy_key?: string
+          op?: string
+          operating_system?: string | null
+          quantity?: number
+          serials?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "serial_batches_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      current_user_role: { Args: never; Returns: string }
+      is_manager_or_developer: { Args: never; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
