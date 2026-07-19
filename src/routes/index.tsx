@@ -8,6 +8,9 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
+const FALLBACK_SUPABASE_URL = "https://yyeawfmohlhizyhcxpji.supabase.co";
+const FALLBACK_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_gcdWmP_UOBNqt-Xhatwgdw_35ri3WzH";
+
 // Markup original do index.html do pacote PBA Flow. O app.js manipula o DOM
 // diretamente por IDs, então preservamos a estrutura exata.
 const SHELL_HTML = `
@@ -98,24 +101,29 @@ function GpjApp() {
       __GPJ_CONFIG__?: { supabaseUrl: string; supabaseKey: string };
     };
     runtimeWindow.__GPJ_CONFIG__ = {
-      supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? "",
+      supabaseUrl: import.meta.env.VITE_SUPABASE_URL || FALLBACK_SUPABASE_URL,
       supabaseKey:
-        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
-        import.meta.env.VITE_SUPABASE_ANON_KEY ??
-        "",
+        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+        import.meta.env.VITE_SUPABASE_ANON_KEY ||
+        FALLBACK_SUPABASE_PUBLISHABLE_KEY,
     };
 
     const backendScript = document.createElement("script");
-    backendScript.src = "/gpj/backend.js";
+    backendScript.src = "/gpj/backend-v2.js";
     backendScript.defer = true;
     const appScript = document.createElement("script");
     appScript.src = "/gpj/app.js";
     appScript.defer = true;
+    const patchScript = document.createElement("script");
+    patchScript.src = "/gpj/app-patch.js";
+    patchScript.defer = true;
     backendScript.addEventListener("load", () => document.body.appendChild(appScript));
+    appScript.addEventListener("load", () => document.body.appendChild(patchScript));
     document.body.appendChild(backendScript);
     return () => {
       backendScript.remove();
       appScript.remove();
+      patchScript.remove();
     };
   }, []);
 
@@ -128,5 +136,9 @@ function GpjApp() {
 }
 
 function Index() {
-  return <ClientOnly fallback={<div style={{ minHeight: "100vh", background: "#0b1220" }} />}><GpjApp /></ClientOnly>;
+  return (
+    <ClientOnly fallback={<div style={{ minHeight: "100vh", background: "#0b1220" }} />}>
+      <GpjApp />
+    </ClientOnly>
+  );
 }
