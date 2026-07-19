@@ -488,7 +488,7 @@
 
   function subscribe(onChange) {
     disconnectRealtime();
-    if (!configured() || !session || !window.WebSocket) return function () {};
+    if (!configured() || !window.WebSocket) return function () {};
     var wsUrl = baseUrl.replace(/^http/, "ws") + "/realtime/v1/websocket?apikey=" + encodeURIComponent(anonKey) + "&vsn=1.0.0";
     var socket = new WebSocket(wsUrl);
     realtimeSocket = socket;
@@ -504,7 +504,7 @@
               presence: { enabled: false },
               postgres_changes: [{ event: "*", schema: "public", table: table }]
             },
-            access_token: session.access_token
+            access_token: (session && session.access_token) || anonKey
           },
           ref: String(index + 1),
           join_ref: String(index + 1)
