@@ -21,12 +21,17 @@
     realtimeStop: null,
     reloadTimer: null
   };
+  var localAdminRole = sessionStorage.getItem("gpj-admin-role");
+  var localAccessHashes = {
+    gestor: "abd88e09866a92db47552c62d095b066e3dbd4a605afe2074aa58f4ff53579d4",
+    dev: "1bf3473ffbc77186154590e27a3073111b6f3b255e6b1f66fa995e8b53f2965b"
+  };
   var sectorLabels = { assembly: "Montagem", assistance: "Assistência", rma: "RMA" };
   var state = {
     view: "overview",
     sector: "assembly",
-    role: localStorage.getItem("gpj-role") || "technician",
-    user: localStorage.getItem("gpj-user") || "Técnico",
+    role: localAdminRole === "manager" || localAdminRole === "developer" ? localAdminRole : "technician",
+    user: localAdminRole === "manager" ? "Gestor" : localAdminRole === "developer" ? "DEV" : "Técnico",
     repairTab: "active",
     theme: localStorage.getItem("gpj-theme") || "light",
     lastSerial: Number(localStorage.getItem("gpj-last-serial") || 184),
@@ -77,6 +82,11 @@
   ];
   function loadLocal(key, fallback) { try { var value = JSON.parse(localStorage.getItem(key)); return Array.isArray(value) ? value : fallback; } catch (error) { return fallback; } }
   function loadObject(key, fallback) { try { var value = JSON.parse(localStorage.getItem(key)); return value && typeof value === "object" && !Array.isArray(value) ? value : fallback; } catch (error) { return fallback; } }
+  function hashAccessValue(value) {
+    return crypto.subtle.digest("SHA-256",new TextEncoder().encode(value)).then(function (buffer) {
+      return Array.from(new Uint8Array(buffer)).map(function (byte) { return byte.toString(16).padStart(2,"0"); }).join("");
+    });
+  }
   var problems = loadLocal("gpj-problems", defaultProblems);
   var solutions = loadLocal("gpj-solutions", defaultSolutions);
   var parts = loadLocal("gpj-parts", defaultParts);
@@ -311,7 +321,7 @@
 
   function autoPauseRepairShift() {
     var now = new Date();
-    var dayKey = now.toISOString().slice(0,10);
+    var dayKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2,"0") + "-" + String(now.getDate()).padStart(2,"0");
     if (now.getHours() < 18 || (now.getHours() === 18 && now.getMinutes() < 5)) return;
     if (localStorage.getItem("gpj-repair-autopause-day") === dayKey) return;
     var changed = false;
@@ -555,10 +565,10 @@
       return "<article class=\"repair-card priority-" + row.priority + " timer-" + (row.timerPaused ? "paused" : "running") + " time-" + timeLevel + "\"><div class=\"repair-top\"><div class=\"repair-identity\"><div class=\"repair-title\"><span>OP " + escapeHtml(row.op) + "</span><strong>" + escapeHtml(row.serial) + "</strong></div><div class=\"repair-meta\"><span class=\"repair-meta-item\"><b>Problema</b>" + escapeHtml(row.issue) + "</span><span class=\"repair-meta-item\"><b>Técnico</b>" + escapeHtml(row.tech) + "</span>" + pill(priorityLabel,priorityTone) + pill(stateLabel,row.status === "waiting" || row.timerPaused ? "amber" : "green") + "</div></div><div class=\"repair-clock-block\"><span>Tempo total</span><time class=\"mono live-repair-clock\" data-repair-timer=\"" + row.id + "\">" + formatClock(elapsed) + "</time><small>" + (timeLevel === "critical" ? "Crítico" : timeLevel === "alert" ? "Em alerta" : "Dentro do tempo") + "</small></div></div>" + (row.waitingReason ? "<p class=\"repair-wait-reason\"><strong>Dependência externa:</strong> " + escapeHtml(row.waitingReason) + (row.waitingNotes ? " · " + escapeHtml(row.waitingNotes) : "") + "</p>" : "") + (row.notes ? "<p class=\"repair-note\">" + escapeHtml(row.notes) + "</p>" : "") + (row.status === "history" ? "" : "<div class=\"stage-track\">" + stageHtml + "</div>") + "<div class=\"repair-actions\">" + actions + "</div></article>";
     }
     var cards = "";
-    if (state.repairTab === "active") {
+    if (state.repairTab !== "history") {
       var grouped = {};
       visibleRows.forEach(function (row) { (grouped[row.tech] = grouped[row.tech] || []).push(row); });
-      cards = Object.keys(grouped).sort().map(function (tech) { var running = grouped[tech].filter(function (row) { return !row.timerPaused; }).length; return "<section class=\"technician-repair-group\"><div class=\"technician-group-head\"><span><strong>" + escapeHtml(tech) + "</strong><small>" + running + " rodando · " + (grouped[tech].length - running) + " pausado(s)</small></span>" + pill(running ? "Em atividade" : "Sem cronômetro ativo",running ? "green" : "amber") + "</div>" + grouped[tech].map(repairCard).join("") + "</section>"; }).join("");
+      cards = Object.keys(grouped).sort().map(function (tech) { var running = grouped[tech].filter(function (row) { return row.status === "active" && !row.timerPaused; }).length; var detail = state.repairTab === "active" ? running + " rodando · " + (grouped[tech].length - running) + " pausado(s)" : grouped[tech].length + " máquina" + (grouped[tech].length === 1 ? "" : "s") + " nesta fila"; return "<section class=\"technician-repair-group\"><div class=\"technician-group-head\"><span><strong>" + escapeHtml(tech) + "</strong><small>" + detail + "</small></span>" + pill(running ? "Em atividade" : state.repairTab === "waiting" ? "Aguardando serviço" : "Sem cronômetro ativo",running ? "green" : "amber") + "</div>" + grouped[tech].map(repairCard).join("") + "</section>"; }).join("");
     } else cards = visibleRows.map(repairCard).join("");
     if (!cards) cards = "<section class=\"panel empty-state\"><strong>Nenhum reparo nesta aba.</strong><small>Use “Planejar reparo” para incluir uma máquina.</small></section>";
     var plannedPreview = repairRows.filter(function (row) { return row.status === "planned" || row.status === "waiting"; }).map(function (row) {
@@ -1045,17 +1055,8 @@
         "<div class=\"modal-actions\"><button class=\"button button--danger\" type=\"button\" data-action=\"role-logout\">Sair</button><button class=\"button\" value=\"cancel\">Fechar</button></div>");
       return;
     }
-    openModal("Acesso restrito","Escolha o perfil",
-      "<p class=\"modal-copy\">O técnico usa o sistema sem senha. Para acessar áreas de Gestor ou DEV, informe a senha do perfil.</p>" +
-      "<div class=\"form-stack\">" +
-        "<label>Perfil<select id=\"role-choice\"><option value=\"manager\">Gestor</option><option value=\"developer\">Desenvolvedor</option></select></label>" +
-        "<label>Senha<input id=\"role-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Senha do perfil\"></label>" +
-      "</div>" +
-      "<div class=\"modal-actions\">" +
-        "<button class=\"button\" type=\"button\" data-action=\"technician-mode\">Continuar como técnico</button>" +
-        "<button class=\"button button--primary\" type=\"button\" data-action=\"role-login\">Entrar</button>" +
-      "</div>");
-    window.setTimeout(function () { var input = $("#role-password"); if (input) input.focus(); }, 0);
+    openModal("Acesso operacional","Entrar como Gestor ou DEV","<p class=\"modal-copy\">O técnico trabalha sem senha. Este acesso administrativo local vale apenas nesta aba; ao configurar o backend, as permissões passam a ser controladas pela conta compartilhada.</p><div class=\"form-stack\"><label>Usuário<input id=\"local-username\" autocomplete=\"username\" placeholder=\"gestor ou dev\"></label><label>Senha<input id=\"local-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Senha de acesso\"></label></div><div class=\"modal-actions modal-actions--split\"><button class=\"button\" type=\"button\" data-action=\"technician-mode\">Continuar como técnico</button><span></span><button class=\"button button--primary\" type=\"button\" data-action=\"local-login\">Entrar</button></div>");
+    window.setTimeout(function () { var input = $("#local-username"); if (input) input.focus(); },0);
   }
 
   function channelModal(bay, channel) {
@@ -1128,35 +1129,36 @@
   function handleAction(action, element) {
     if (action === "technician-mode") {
       state.role = "technician"; state.user = "Técnico";
-      localStorage.setItem("gpj-role",state.role); localStorage.setItem("gpj-user",state.user);
+      sessionStorage.removeItem("gpj-admin-role");
       if ($("#modal").open) $("#modal").close(); state.view = "overview"; render();
       return;
     }
-    if (action === "role-login") {
-      var chosenRole = ($("#role-choice") && $("#role-choice").value) || "manager";
-      var typedPassword = ($("#role-password") && $("#role-password").value) || "";
-      var expectedPasswords = { manager: "power@123", developer: "Araujo321" };
-      if (typedPassword !== expectedPasswords[chosenRole]) {
-        showToast("Senha incorreta para " + roleLabels[chosenRole].name + ".");
-        var passwordInput = $("#role-password");
-        if (passwordInput) { passwordInput.value = ""; passwordInput.focus(); }
-        return;
-      }
-      state.role = chosenRole;
-      state.user = roleLabels[chosenRole].name;
-      localStorage.setItem("gpj-role", state.role);
-      localStorage.setItem("gpj-user", state.user);
-      $("#modal").close();
-      state.view = "overview";
-      render();
-      showToast("Acesso liberado como " + roleLabels[chosenRole].name + ".");
+    if (action === "local-login") {
+      var localUsername = $("#local-username").value.trim().toLowerCase();
+      var localPassword = $("#local-password").value;
+      if (!localAccessHashes[localUsername] || !localPassword) { showToast("Informe usuário e senha válidos."); return; }
+      element.disabled = true;
+      element.textContent = "Entrando...";
+      hashAccessValue(localPassword).then(function (hash) {
+        if (hash !== localAccessHashes[localUsername]) throw new Error("Usuário ou senha inválidos.");
+        state.role = localUsername === "gestor" ? "manager" : "developer";
+        state.user = state.role === "manager" ? "Gestor" : "DEV";
+        sessionStorage.setItem("gpj-admin-role",state.role);
+        $("#modal").close();
+        state.view = "overview";
+        render();
+        showToast("Acesso " + state.user + " liberado nesta aba.");
+      }).catch(function (error) {
+        element.disabled = false;
+        element.textContent = "Entrar";
+        showToast(error.message || "Não foi possível validar o acesso.");
+      });
       return;
     }
     if (action === "role-logout") {
       state.role = "technician";
       state.user = "Técnico";
-      localStorage.setItem("gpj-role", state.role);
-      localStorage.setItem("gpj-user", state.user);
+      sessionStorage.removeItem("gpj-admin-role");
       $("#modal").close();
       state.view = "overview";
       render();
@@ -1346,10 +1348,10 @@
     if (event.key === "Escape") closeDrawers();
     if (event.key === "Enter" && event.target.id === "bios-op" && !$("#bios-serial").value.trim()) { event.preventDefault(); $("#bios-serial").focus(); }
     if (event.key === "Escape" && event.target.id === "bios-serial") { event.target.value = ""; event.target.focus(); }
-    if (event.key === "Enter" && $("#modal").open && $("#role-password") && event.target.closest("#modal")) {
+    if (event.key === "Enter" && $("#modal").open && $("#local-password") && event.target.closest("#modal")) {
       event.preventDefault();
-      var roleLoginButton = $('[data-action="role-login"]');
-      if (roleLoginButton && !roleLoginButton.disabled) roleLoginButton.click();
+      var localLoginButton = $('[data-action="local-login"]');
+      if (localLoginButton && !localLoginButton.disabled) localLoginButton.click();
     }
   });
   document.addEventListener("change", function (event) {
@@ -1443,11 +1445,6 @@
     kvmSessions = [];
     kvmQueue = [];
     serialBatches = [];
-  } else if (state.role !== "technician") {
-    state.role = "technician";
-    state.user = "Técnico";
-    localStorage.setItem("gpj-role",state.role);
-    localStorage.setItem("gpj-user",state.user);
   }
 
   function renderBios() {
@@ -1456,7 +1453,7 @@
     }).join("") || "<tr><td colspan=\"5\" class=\"empty-table\">Nenhuma máquina registrada na BIOS neste navegador.</td></tr>";
     var problemOptions = problems.map(function (problem) { return "<option>" + escapeHtml(problem) + "</option>"; }).join("");
     return "<div class=\"page-stack bios-page\">" + pageHead("Posto da linha","BIOS · triagem rápida","Bipe ou digite sem usar o mouse. Depois do registro, o foco volta automaticamente para o próximo serial.","") +
-      "<section class=\"panel panel-pad bios-console\"><div class=\"bios-console-head\"><div><span class=\"eyebrow\">Leitura contínua</span><h2>Registrar passagem na BIOS</h2><p>Fixe a O.P. quando estiver conferindo várias máquinas do mesmo lote.</p></div>" + pill("Enter confirma","green") + "</div><form id=\"bios-form\" class=\"bios-form\"><label class=\"field\">O.P.<input id=\"bios-op\" value=\"" + escapeHtml(state.biosFixedOp) + "\" placeholder=\"Bipe ou digite a O.P.\" autocomplete=\"off\"></label><label class=\"field bios-serial-field\">Número de série<input id=\"bios-serial\" placeholder=\"Bipe o serial e pressione Enter\" autocomplete=\"off\"></label><label class=\"field\">Destino<select id=\"bios-destination\"><option value=\"kvm\">Aprovada → Fila do KVM</option><option value=\"repair\">Problema → Planejamento do Reparo</option></select></label><label class=\"field bios-problem\">Problema<select id=\"bios-problem\">" + problemOptions + "</select></label><label class=\"check-field\"><input id=\"bios-keep-op\" type=\"checkbox\" " + (state.biosFixedOp ? "checked" : "") + "><span>Manter esta O.P. para as próximas leituras</span></label><button class=\"button button--primary bios-submit\" type=\"submit\">Registrar e preparar próxima</button></form><div class=\"bios-shortcuts\"><span><kbd>Enter</kbd> registra</span><span><kbd>Tab</kbd> muda o campo</span><span><kbd>Esc</kbd> limpa o serial</span></div></section>" +
+      "<section class=\"panel panel-pad bios-console\"><div class=\"bios-console-head\"><div><span class=\"eyebrow\">Leitura contínua</span><h2>Registrar passagem na BIOS</h2><p>Fixe a O.P. quando estiver conferindo várias máquinas do mesmo lote.</p></div>" + pill("Enter confirma","green") + "</div><form id=\"bios-form\" class=\"bios-form\"><label class=\"field\">O.P.<input id=\"bios-op\" value=\"" + escapeHtml(state.biosFixedOp) + "\" placeholder=\"Bipe ou digite a O.P.\" autocomplete=\"off\"></label><label class=\"field bios-serial-field\">Número de série<input id=\"bios-serial\" placeholder=\"Bipe o serial e pressione Enter\" autocomplete=\"off\"></label><label class=\"field\">Destino<select id=\"bios-destination\"><option value=\"kvm\">Aprovada → Fila do KVM</option><option value=\"repair\">Problema → Planejamento do Reparo</option></select></label><label class=\"field bios-problem is-hidden\">Problema<select id=\"bios-problem\">" + problemOptions + "</select></label><label class=\"check-field\"><input id=\"bios-keep-op\" type=\"checkbox\" " + (state.biosFixedOp ? "checked" : "") + "><span>Manter esta O.P. para as próximas leituras</span></label><button class=\"button button--primary bios-submit\" type=\"submit\">Registrar e preparar próxima</button></form><div class=\"bios-shortcuts\"><span><kbd>Enter</kbd> registra</span><span><kbd>Tab</kbd> muda o campo</span><span><kbd>Esc</kbd> limpa o serial</span></div></section>" +
       "<section class=\"panel\"><div class=\"panel-head\"><div><span>Últimas leituras</span><h2>Passagens registradas na BIOS</h2></div>" + pill(biosHistory.length + " registros","blue") + "</div><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Hora</th><th>O.P.</th><th>Serial</th><th>Destino</th><th>Resultado</th></tr></thead><tbody>" + recent + "</tbody></table></div></section></div>";
   }
 
