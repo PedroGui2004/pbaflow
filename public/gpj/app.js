@@ -1038,18 +1038,24 @@
   }
 
   function profileModal() {
-    if (backendState.configured && !backend.getSession()) {
-      openModal("Acesso seguro","Entrar no PBA Flow","<p class=\"modal-copy\">Use o e-mail e a senha cadastrados pelo administrador. O perfil e as permissoes serao carregados automaticamente.</p><div class=\"form-stack\"><label>E-mail<input id=\"auth-email\" type=\"email\" autocomplete=\"username\" placeholder=\"nome@empresa.com.br\"></label><label>Senha<input id=\"auth-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Sua senha\"></label></div><div class=\"modal-actions\"><button class=\"button button--primary\" type=\"button\" data-action=\"sign-in\">Entrar</button></div>");
-      window.setTimeout(function () { var input = $("#auth-email"); if (input) input.focus(); }, 0);
+    if (state.role === "manager" || state.role === "developer") {
+      var currentRole = roleLabels[state.role];
+      openModal("Sessão ativa", currentRole.name,
+        "<p class=\"modal-copy\">Você está autenticado como <strong>" + escapeHtml(currentRole.name) + "</strong> (" + escapeHtml(currentRole.label) + ").</p>" +
+        "<div class=\"modal-actions\"><button class=\"button button--danger\" type=\"button\" data-action=\"role-logout\">Sair</button><button class=\"button\" value=\"cancel\">Fechar</button></div>");
       return;
     }
-    if (backendState.configured) {
-      var activeProfile = backendState.profile || backend.getProfile() || {};
-      var activeRole = roleLabels[activeProfile.role] || roleLabels.technician;
-      openModal("Sessao autenticada",activeProfile.display_name || state.user,"<div class=\"profile-session\"><span class=\"profile-session-avatar\">" + escapeHtml((activeProfile.display_name || state.user || "U").charAt(0).toUpperCase()) + "</span><div><strong>" + escapeHtml(activeProfile.email || "Usuario autenticado") + "</strong><small>" + escapeHtml(activeRole.name + " · " + activeRole.label) + "</small></div></div><p class=\"modal-copy\">Alteracoes sao identificadas por usuario e registradas na auditoria da operacao.</p><div class=\"modal-actions\"><button class=\"button button--danger\" type=\"button\" data-action=\"sign-out\">Sair desta conta</button><button class=\"button\" value=\"cancel\">Fechar</button></div>");
-      return;
-    }
-    openModal("Acesso operacional","Modo técnico","<p class=\"modal-copy\">O técnico usa o sistema sem senha. Para entrar como Gestor ou DEV, configure o backend seguro e cadastre as contas administrativas; as senhas não ficam expostas no HTML.</p><div class=\"modal-actions\"><button class=\"button button--primary\" type=\"button\" data-action=\"technician-mode\">Continuar como técnico</button></div>");
+    openModal("Acesso restrito","Escolha o perfil",
+      "<p class=\"modal-copy\">O técnico usa o sistema sem senha. Para acessar áreas de Gestor ou DEV, informe a senha do perfil.</p>" +
+      "<div class=\"form-stack\">" +
+        "<label>Perfil<select id=\"role-choice\"><option value=\"manager\">Gestor</option><option value=\"developer\">Desenvolvedor</option></select></label>" +
+        "<label>Senha<input id=\"role-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Senha do perfil\"></label>" +
+      "</div>" +
+      "<div class=\"modal-actions\">" +
+        "<button class=\"button\" type=\"button\" data-action=\"technician-mode\">Continuar como técnico</button>" +
+        "<button class=\"button button--primary\" type=\"button\" data-action=\"role-login\">Entrar</button>" +
+      "</div>");
+    window.setTimeout(function () { var input = $("#role-password"); if (input) input.focus(); }, 0);
   }
 
   function channelModal(bay, channel) {
