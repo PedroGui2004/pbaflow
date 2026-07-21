@@ -7,6 +7,12 @@
     developer: { name: "Desenvolvedor", label: "DEV · Integração" }
   };
   var backend = window.gpjBackend || null;
+  function nowMs() {
+    if (backend && typeof backend.serverNow === "function") {
+      try { return backend.serverNow(); } catch (error) { /* fallback local */ }
+    }
+    return Date.now();
+  }
   var backendState = {
     configured: Boolean(backend && backend.configured),
     remoteReady: false,
