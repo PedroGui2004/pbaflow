@@ -1038,18 +1038,24 @@
   }
 
   function profileModal() {
-    if (backendState.configured && !backend.getSession()) {
-      openModal("Acesso seguro","Entrar no PBA Flow","<p class=\"modal-copy\">Use o e-mail e a senha cadastrados pelo administrador. O perfil e as permissoes serao carregados automaticamente.</p><div class=\"form-stack\"><label>E-mail<input id=\"auth-email\" type=\"email\" autocomplete=\"username\" placeholder=\"nome@empresa.com.br\"></label><label>Senha<input id=\"auth-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Sua senha\"></label></div><div class=\"modal-actions\"><button class=\"button button--primary\" type=\"button\" data-action=\"sign-in\">Entrar</button></div>");
-      window.setTimeout(function () { var input = $("#auth-email"); if (input) input.focus(); }, 0);
+    if (state.role === "manager" || state.role === "developer") {
+      var currentRole = roleLabels[state.role];
+      openModal("Sessão ativa", currentRole.name,
+        "<p class=\"modal-copy\">Você está autenticado como <strong>" + escapeHtml(currentRole.name) + "</strong> (" + escapeHtml(currentRole.label) + ").</p>" +
+        "<div class=\"modal-actions\"><button class=\"button button--danger\" type=\"button\" data-action=\"role-logout\">Sair</button><button class=\"button\" value=\"cancel\">Fechar</button></div>");
       return;
     }
-    if (backendState.configured) {
-      var activeProfile = backendState.profile || backend.getProfile() || {};
-      var activeRole = roleLabels[activeProfile.role] || roleLabels.technician;
-      openModal("Sessao autenticada",activeProfile.display_name || state.user,"<div class=\"profile-session\"><span class=\"profile-session-avatar\">" + escapeHtml((activeProfile.display_name || state.user || "U").charAt(0).toUpperCase()) + "</span><div><strong>" + escapeHtml(activeProfile.email || "Usuario autenticado") + "</strong><small>" + escapeHtml(activeRole.name + " · " + activeRole.label) + "</small></div></div><p class=\"modal-copy\">Alteracoes sao identificadas por usuario e registradas na auditoria da operacao.</p><div class=\"modal-actions\"><button class=\"button button--danger\" type=\"button\" data-action=\"sign-out\">Sair desta conta</button><button class=\"button\" value=\"cancel\">Fechar</button></div>");
-      return;
-    }
-    openModal("Acesso operacional","Modo técnico","<p class=\"modal-copy\">O técnico usa o sistema sem senha. Para entrar como Gestor ou DEV, configure o backend seguro e cadastre as contas administrativas; as senhas não ficam expostas no HTML.</p><div class=\"modal-actions\"><button class=\"button button--primary\" type=\"button\" data-action=\"technician-mode\">Continuar como técnico</button></div>");
+    openModal("Acesso restrito","Escolha o perfil",
+      "<p class=\"modal-copy\">O técnico usa o sistema sem senha. Para acessar áreas de Gestor ou DEV, informe a senha do perfil.</p>" +
+      "<div class=\"form-stack\">" +
+        "<label>Perfil<select id=\"role-choice\"><option value=\"manager\">Gestor</option><option value=\"developer\">Desenvolvedor</option></select></label>" +
+        "<label>Senha<input id=\"role-password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Senha do perfil\"></label>" +
+      "</div>" +
+      "<div class=\"modal-actions\">" +
+        "<button class=\"button\" type=\"button\" data-action=\"technician-mode\">Continuar como técnico</button>" +
+        "<button class=\"button button--primary\" type=\"button\" data-action=\"role-login\">Entrar</button>" +
+      "</div>");
+    window.setTimeout(function () { var input = $("#role-password"); if (input) input.focus(); }, 0);
   }
 
   function channelModal(bay, channel) {
@@ -1126,44 +1132,35 @@
       if ($("#modal").open) $("#modal").close(); state.view = "overview"; render();
       return;
     }
-    if (action === "sign-in") {
-      var authEmail = $("#auth-email").value.trim();
-      var authPassword = $("#auth-password").value;
-      if (!authEmail || !authPassword) { showToast("Informe o e-mail e a senha."); return; }
-      element.disabled = true;
-      element.textContent = "Entrando...";
-      backend.signIn(authEmail, authPassword).then(async function (result) {
-        backendState.profile = result.profile;
-        backendState.status = "connecting";
-        $("#modal").close();
-        await reloadRemoteSnapshot(true);
-        startRealtime();
-        showToast("Acesso liberado. Base compartilhada online.");
-      }).catch(function (error) {
-        element.disabled = false;
-        element.textContent = "Entrar";
-        showToast(error.message || "E-mail ou senha invalidos.");
-      });
+    if (action === "role-login") {
+      var chosenRole = ($("#role-choice") && $("#role-choice").value) || "manager";
+      var typedPassword = ($("#role-password") && $("#role-password").value) || "";
+      var expectedPasswords = { manager: "power@123", developer: "Araujo321" };
+      if (typedPassword !== expectedPasswords[chosenRole]) {
+        showToast("Senha incorreta para " + roleLabels[chosenRole].name + ".");
+        var passwordInput = $("#role-password");
+        if (passwordInput) { passwordInput.value = ""; passwordInput.focus(); }
+        return;
+      }
+      state.role = chosenRole;
+      state.user = roleLabels[chosenRole].name;
+      localStorage.setItem("gpj-role", state.role);
+      localStorage.setItem("gpj-user", state.user);
+      $("#modal").close();
+      state.view = "overview";
+      render();
+      showToast("Acesso liberado como " + roleLabels[chosenRole].name + ".");
       return;
     }
-    if (action === "sign-out") {
-      backend.signOut().then(function () {
-        backendState.remoteReady = false;
-        backendState.profile = null;
-        backendState.status = "signed-out";
-        machines = [];
-        repairRows = [];
-        kvmSessions = [];
-        kvmQueue = [];
-        serialBatches = [];
-        $("#modal").close();
-        render();
-        profileModal();
-      });
-      return;
-    }
-    if (action === "switch-role" && backendState.configured) {
-      showToast("O perfil e definido pelo administrador.");
+    if (action === "role-logout") {
+      state.role = "technician";
+      state.user = "Técnico";
+      localStorage.setItem("gpj-role", state.role);
+      localStorage.setItem("gpj-user", state.user);
+      $("#modal").close();
+      state.view = "overview";
+      render();
+      showToast("Sessão encerrada.");
       return;
     }
     if (action === "new-repair") newRepairModal();
@@ -1349,10 +1346,10 @@
     if (event.key === "Escape") closeDrawers();
     if (event.key === "Enter" && event.target.id === "bios-op" && !$("#bios-serial").value.trim()) { event.preventDefault(); $("#bios-serial").focus(); }
     if (event.key === "Escape" && event.target.id === "bios-serial") { event.target.value = ""; event.target.focus(); }
-    if (event.key === "Enter" && $("#modal").open && $("#auth-password") && event.target.closest("#modal")) {
+    if (event.key === "Enter" && $("#modal").open && $("#role-password") && event.target.closest("#modal")) {
       event.preventDefault();
-      var signInButton = $('[data-action="sign-in"]');
-      if (signInButton && !signInButton.disabled) signInButton.click();
+      var roleLoginButton = $('[data-action="role-login"]');
+      if (roleLoginButton && !roleLoginButton.disabled) roleLoginButton.click();
     }
   });
   document.addEventListener("change", function (event) {
