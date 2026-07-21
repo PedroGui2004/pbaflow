@@ -14,6 +14,20 @@
   var baselineSnapshot = null;
   var realtimeSocket = null;
   var heartbeatTimer = null;
+  var serverOffsetMs = 0;
+
+  function updateServerOffset(response) {
+    try {
+      var dateHeader = response && response.headers && response.headers.get && response.headers.get("date");
+      if (!dateHeader) return;
+      var serverMs = Date.parse(dateHeader);
+      if (!Number.isFinite(serverMs)) return;
+      serverOffsetMs = serverMs - Date.now();
+    } catch (error) { /* ignora falha de parsing */ }
+  }
+
+  function serverNow() { return Date.now() + serverOffsetMs; }
+  function getServerOffset() { return serverOffsetMs; }
 
   function configured() {
     return Boolean(baseUrl && anonKey);
@@ -49,11 +63,13 @@
     options = options || {};
     options.headers = headers(options.headers);
     var response = await fetch(baseUrl + path, options);
+    updateServerOffset(response);
     if (response.status === 401 && session && session.refresh_token && path.indexOf("/auth/v1/token") !== 0) {
       var refreshed = await refreshSession();
       if (refreshed) {
         options.headers = headers(options.headers);
         response = await fetch(baseUrl + path, options);
+        updateServerOffset(response);
       }
     }
     if (!response.ok) {
@@ -536,6 +552,8 @@
     syncSnapshot: syncSnapshot,
     remove: remove,
     subscribe: subscribe,
-    disconnectRealtime: disconnectRealtime
+    disconnectRealtime: disconnectRealtime,
+    serverNow: serverNow,
+    getServerOffset: getServerOffset
   };
 })();
