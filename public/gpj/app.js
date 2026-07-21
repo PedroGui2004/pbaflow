@@ -1479,6 +1479,17 @@
   autoPauseRepairShift();
   render();
   initializeBackend();
-  window.setInterval(updateKvmTimers,1000);
+  function scheduleTimerTick() {
+    var delay = 1000 - (nowMs() % 1000);
+    window.setTimeout(function () {
+      try { updateKvmTimers(); } catch (error) { /* mantém o loop vivo */ }
+      scheduleTimerTick();
+    }, delay);
+  }
+  scheduleTimerTick();
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) updateKvmTimers();
+  });
+  window.addEventListener("focus", updateKvmTimers);
   window.setInterval(autoPauseRepairShift,30000);
 })();
