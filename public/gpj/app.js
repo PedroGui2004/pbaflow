@@ -253,7 +253,7 @@
   function normalizeKvmSessions() {
     kvmSessions.forEach(function (session) {
       if (!Number.isFinite(session.elapsedSeconds)) session.elapsedSeconds = legacyElapsedSeconds(session.elapsed);
-      if (session.status === "testing" && !session.startedAt) session.startedAt = Date.now();
+      if (session.status === "testing" && !session.startedAt) session.startedAt = nowMs();
       if (session.status === "paused") session.startedAt = null;
       if (!Number.isFinite(session.failures)) session.failures = 0;
       if (!session.system || session.system === "Não informado") session.system = machineSystem(session.serial);
@@ -264,7 +264,7 @@
 
   function kvmElapsedSeconds(session) {
     var seconds = Number(session.elapsedSeconds || 0);
-    if (session.status === "testing" && session.startedAt) seconds += Math.max(0,Math.floor((Date.now() - session.startedAt) / 1000));
+    if (session.status === "testing" && session.startedAt) seconds += Math.max(0,Math.floor((nowMs() - session.startedAt) / 1000));
     return seconds;
   }
 
@@ -305,7 +305,7 @@
 
   function repairElapsedSeconds(repair) {
     var seconds = Number(repair.elapsedSeconds || 0);
-    if (repair.status === "active" && !repair.timerPaused && repair.startedAt) seconds += Math.max(0,Math.floor((Date.now() - repair.startedAt) / 1000));
+    if (repair.status === "active" && !repair.timerPaused && repair.startedAt) seconds += Math.max(0,Math.floor((nowMs() - repair.startedAt) / 1000));
     return seconds;
   }
 
