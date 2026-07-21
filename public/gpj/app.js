@@ -1132,44 +1132,35 @@
       if ($("#modal").open) $("#modal").close(); state.view = "overview"; render();
       return;
     }
-    if (action === "sign-in") {
-      var authEmail = $("#auth-email").value.trim();
-      var authPassword = $("#auth-password").value;
-      if (!authEmail || !authPassword) { showToast("Informe o e-mail e a senha."); return; }
-      element.disabled = true;
-      element.textContent = "Entrando...";
-      backend.signIn(authEmail, authPassword).then(async function (result) {
-        backendState.profile = result.profile;
-        backendState.status = "connecting";
-        $("#modal").close();
-        await reloadRemoteSnapshot(true);
-        startRealtime();
-        showToast("Acesso liberado. Base compartilhada online.");
-      }).catch(function (error) {
-        element.disabled = false;
-        element.textContent = "Entrar";
-        showToast(error.message || "E-mail ou senha invalidos.");
-      });
+    if (action === "role-login") {
+      var chosenRole = ($("#role-choice") && $("#role-choice").value) || "manager";
+      var typedPassword = ($("#role-password") && $("#role-password").value) || "";
+      var expectedPasswords = { manager: "power@123", developer: "Araujo321" };
+      if (typedPassword !== expectedPasswords[chosenRole]) {
+        showToast("Senha incorreta para " + roleLabels[chosenRole].name + ".");
+        var passwordInput = $("#role-password");
+        if (passwordInput) { passwordInput.value = ""; passwordInput.focus(); }
+        return;
+      }
+      state.role = chosenRole;
+      state.user = roleLabels[chosenRole].name;
+      localStorage.setItem("gpj-role", state.role);
+      localStorage.setItem("gpj-user", state.user);
+      $("#modal").close();
+      state.view = "overview";
+      render();
+      showToast("Acesso liberado como " + roleLabels[chosenRole].name + ".");
       return;
     }
-    if (action === "sign-out") {
-      backend.signOut().then(function () {
-        backendState.remoteReady = false;
-        backendState.profile = null;
-        backendState.status = "signed-out";
-        machines = [];
-        repairRows = [];
-        kvmSessions = [];
-        kvmQueue = [];
-        serialBatches = [];
-        $("#modal").close();
-        render();
-        profileModal();
-      });
-      return;
-    }
-    if (action === "switch-role" && backendState.configured) {
-      showToast("O perfil e definido pelo administrador.");
+    if (action === "role-logout") {
+      state.role = "technician";
+      state.user = "Técnico";
+      localStorage.setItem("gpj-role", state.role);
+      localStorage.setItem("gpj-user", state.user);
+      $("#modal").close();
+      state.view = "overview";
+      render();
+      showToast("Sessão encerrada.");
       return;
     }
     if (action === "new-repair") newRepairModal();
