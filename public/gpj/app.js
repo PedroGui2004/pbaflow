@@ -1346,10 +1346,10 @@
     if (event.key === "Escape") closeDrawers();
     if (event.key === "Enter" && event.target.id === "bios-op" && !$("#bios-serial").value.trim()) { event.preventDefault(); $("#bios-serial").focus(); }
     if (event.key === "Escape" && event.target.id === "bios-serial") { event.target.value = ""; event.target.focus(); }
-    if (event.key === "Enter" && $("#modal").open && $("#auth-password") && event.target.closest("#modal")) {
+    if (event.key === "Enter" && $("#modal").open && $("#role-password") && event.target.closest("#modal")) {
       event.preventDefault();
-      var signInButton = $('[data-action="sign-in"]');
-      if (signInButton && !signInButton.disabled) signInButton.click();
+      var roleLoginButton = $('[data-action="role-login"]');
+      if (roleLoginButton && !roleLoginButton.disabled) roleLoginButton.click();
     }
   });
   document.addEventListener("change", function (event) {
